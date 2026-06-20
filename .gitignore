@@ -1,3 +1,4 @@
 .planning/
 .venv/
 __pycache__/
+cos_mcp.egg-info/
