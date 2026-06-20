@@ -4,14 +4,25 @@ HydraDB-backed persistent memory — graph-enriched recall and personalized
 context via the HydraDB v2 API. One HydraDB tenant shared across all your
 Hermes profiles; optional per-profile isolation via sub-tenants.
 
+Thin provider (~284 lines) extending `cos_mcp.BaseMemoryProvider`. All shared
+infrastructure (circuit breaker, threading, config loading) lives in the
+`cos_mcp` package.
+
 ## Setup
 
-### 1. Get an API key
+### 1. Install shared package
+
+```bash
+pip install -e /path/to/cos-mcp
+pip install hydradb-sdk
+```
+
+### 2. Get an API key
 
 Sign up at [app.hydradb.com](https://app.hydradb.com), create a tenant,
 and copy your API key.
 
-### 2. Install the plugin
+### 3. Install the plugin
 
 ```bash
 # Copy into the in-tree plugins directory
@@ -21,13 +32,13 @@ cp -r hydradb-memory/ ~/.hermes/hermes-agent/plugins/memory/hydradb/
 ln -s $(pwd)/hydradb-memory ~/.hermes/hermes-agent/plugins/memory/hydradb
 ```
 
-### 3. Set your API key
+### 4. Set your API key
 
 ```bash
 echo 'HYDRA_DB_API_KEY=sk_live_...' >> ~/.hermes/.env
 ```
 
-### 4. Activate the provider
+### 5. Activate the provider
 
 In `~/.hermes/config.yaml`:
 
@@ -36,7 +47,7 @@ memory:
   provider: hydradb
 ```
 
-### 5. Configure (optional)
+### 6. Configure (optional)
 
 Run `hermes memory setup` or create `~/.hermes/hydradb.json`:
 
@@ -55,6 +66,16 @@ Run `hermes memory setup` or create `~/.hermes/hydradb.json`:
 | `query_mode` | `thinking` | `thinking` (reranking + graph traversal) or `fast` (lower latency) |
 
 ## How it works
+
+The provider extends `cos_mcp.BaseMemoryProvider` which handles:
+- Circuit breaker (dual read/write gauges)
+- Daemon thread management (fire-and-forget writes)
+- Config loading pattern
+- Prefetch / cache model for reads
+- Session lifecycle hooks
+
+The thin provider (~284 lines) only defines HydraDB-specific config, tool
+schemas, tool handlers, and system prompt text.
 
 - **Every turn:** A background query fetches relevant memories before the
   model runs. Results are injected into the system prompt.
@@ -83,10 +104,20 @@ calls and tenants. Paid tiers: Surge ($25/mo, 2GB storage) and Scale
 
 ## Architecture
 
-See `research/hydradb-provider-design.md` for the full blueprint.
+Shared infrastructure in `cos_mcp/`:
+- `cos_mcp/backends/hydradb.py` — HydraDBBackend (SDK wrapper, tenant provisioning)
+- `cos_mcp/formatting/hydradb.py` — HydraDBFormatter (chunk extraction)
+- `cos_mcp/circuit_breaker.py` — Dual-gauge circuit breaker
+- `cos_mcp/base_provider.py` — BaseMemoryProvider (threading, lifecycle)
+
+Thin plugin at `hydradb-memory/__init__.py` (~284 lines):
+- Config, tool schemas, tool handlers, system prompt block
+- Subclass hooks: `_create_backend()`, `_create_formatter()`
+
+Research: `research/hydradb-provider-design.md` (blueprint), `research/hydradb-v2-research.md` (API reference)
 
 ## Requirements
 
-- Python 3.11+
+- Python 3.12+
+- `cos_mcp` package (shared infrastructure)
 - `hydradb-sdk>=2,<3`
-- `HYDRA_DB_API_KEY` environment variable

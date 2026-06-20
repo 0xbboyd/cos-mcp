@@ -1,62 +1,67 @@
-# Memory Provider Plugins for Hermes Agent
+# COS-MCP — Shared Infrastructure for Hermes Agent Plugins
 
 ## What This Is
 
-Two Hermes Agent memory provider plugins:
+**cos-mcp** is a Python package providing shared infrastructure for Hermes Agent plugins — circuit breaker, backend abstraction, formatting, and base classes for memory providers and context engines.
 
-1. **HydraDB Memory Provider** — cloud-backed persistent memory using HydraDB's managed graph database. Replaces Hermes' built-in file-based memory with persistent, cross-session, graph-enriched semantic retrieval shared across all profiles. One HydraDB tenant isolates per-profile memories via sub-tenant IDs.
+Four plugins extend this infrastructure:
 
-2. **MuninnDB Memory Provider** — local cognitive memory using MuninnDB's neuroscience-inspired engine. ACT-R temporal scoring (frequent access strengthens recall; stale memories fade), Hebbian co-activation learning (memories used together auto-associate), Bayesian confidence tracking (contradicted memories are discounted), and 16 typed relationship types — all engine-native. One Muninn vault per profile for isolation.
+1. **HydraDB Memory Provider** — cloud-backed persistent memory using HydraDB's managed graph database. Graph-enriched semantic retrieval with auto-fact-extraction. One HydraDB tenant isolates per-profile memories via sub-tenant IDs.
 
-## Current Milestone: v1.1 Context Engine Plugins
+2. **MuninnDB Memory Provider** — local cognitive memory using MuninnDB's neuroscience-inspired engine. ACT-R temporal scoring, Hebbian co-activation learning, Bayesian confidence tracking, and 16 typed relationship types — all engine-native.
 
-**Goal:** Two Hermes Agent context engine plugins (HydraDB + MuninnDB) that implement the ContextEngine ABC — replacing the built-in lossy ContextCompressor with graph/cognitive-backed context management. Same quality bar as v1.0 memory providers (full implementation + tests + in-tree deploy).
+3. **HydraDB Context Engine** — graph-backed context compression and retrieval. Full compress() pipeline with pure-Python entity extraction, fire-and-forget graph ingest, and tool-based context_search/context_expand with graph traversal.
 
-**Target features:**
-- HydraDB Context Engine — graph-backed compress() pathway, context_search/context_expand tools, session lifecycle, circuit breaker
-- MuninnDB Context Engine — cognitive-backed compress() with ACT-R decay + Hebbian learning, context_search/context_expand tools, local sync execution
-- Shared cos_mcp infra — BaseContextEngine, circuit breaker, config loading, formatting
-- Test suites — fake backends for both engines, 100% requirement coverage
-- In-tree deployment — `plugins/context_engine/hydradb-context/` and `plugins/context_engine/muninn-context/`
+4. **MuninnDB Context Engine** — cognitive-backed context compression and retrieval. Full compress() pipeline with 16 relationship type classification, synchronous engram storage, and Bayesian confidence-gated retrieval tools.
 
-## Core Value
+## Current Milestone: v0.2.0 — Context Engines Complete
 
-Persistent searchable memory that survives across Hermes sessions and profiles — replacing ephemeral per-session context with durable, retrievable knowledge. Two backends serving the same contract — swap by changing one config value.
+**Completed phases:**
+- Phase 1-4: HydraDB Memory Provider (v1.0)
+- Phase 5: Shared infrastructure extraction — cos_mcp package with BaseMemoryProvider, BaseContextEngine, backends, formatters
+- Phase 6: HydraDB Context Engine — full compress() pipeline, entity extraction, tools, lifecycle
+- Phase 7: MuninnDB Context Engine — full cognitive compress pipeline, 16 relationship types
+- Phase 8: Testing — 115 tests, zero failures, fake backends
+
+**Target features delivered:**
+- HydraDB Context Engine — graph-backed compress() pathway, context_search/context_expand tools, session lifecycle, circuit breaker ✓
+- MuninnDB Context Engine — cognitive-backed compress() with ACT-R decay + Hebbian learning, context_search/context_expand tools ✓
+- Shared cos_mcp infra — BaseContextEngine, CircuitBreaker, config loading, formatting ✓
+- Test suites — fake backends for both engines, 100% requirement coverage ✓
+- In-tree deployment — `plugins/context_engine/hydradb-context/` and `plugins/context_engine/muninn-context/` ✓
 
 ## Requirements
 
-### Validated — HydraDB Provider
+### Validated — Shared Infrastructure
 
-- ✓ Config layer: env (`HYDRA_DB_API_KEY`) + JSON (`hydradb.json`) — implemented
-- ✓ Lifecycle: `name`, `is_available()`, `initialize()` — implemented
-- ✓ Read path: `system_prompt_block()`, `prefetch()`, `queue_prefetch()` with `_format_chunks()` — implemented
-- ✓ Write path: `sync_turn()` (infer=true) — implemented
-- ✓ `on_memory_write()` add/replace/delete paths with content-hash IDs — implemented
-- ✓ Tools: `hydradb_search`, `hydradb_profile`, `hydradb_conclude` with OpenAI schemas — implemented
-- ✓ Circuit breaker: dual read/write gauges, 5 consecutive failures → 120s cooldown — implemented
-- ✓ Lazy thread-safe client via `threading.Lock` — implemented
-- ✓ Tenant auto-provisioning: create if missing, poll until ready, handle 409 conflict — implemented
-- ✓ `on_session_end()` ingest session summary as episodic memory — implemented
-- ✓ `shutdown()` drain-threads: join background threads with 5s timeout — implemented
-- ✓ Hermes integration: plugin installed in-tree, `hermes memory setup hydradb`, `hermes doctor` clean — deployed
-- ✓ Cross-profile activation: all gateway profiles use hydradb provider — deployed
+- ✓ `cos_mcp` package: CircuitBreaker, MemoryBackend ABC, MemoryFormatter ABC, ContextFormatter ABC
+- ✓ `BaseMemoryProvider(MemoryProvider)` — threading, circuit breaker, read/write paths, shared tool helpers
+- ✓ `BaseContextEngine(ContextEngine)` — token tracking, compression gating, lifecycle, config loading
+- ✓ `HydraDBBackend`, `MuninnDBBackend` — both implement MemoryBackend ABC
+- ✓ Formatters: HydraDBFormatter, MuninnDBFormatter, HydraDBContextFormatter, MuninnDBContextFormatter
 
-### Validated — MuninnDB Provider
+### Validated — Memory Providers
 
-- ✓ Config layer: env (`MUNINN_API_KEY`) + JSON (`muninn.json`) — implemented
-- ✓ Lifecycle: `name`, `is_available()`, `initialize()` — implemented
-- ✓ Read path: `system_prompt_block()`, `prefetch()`, `queue_prefetch()` with `_format_activations()` — implemented
-- ✓ Write path: `sync_turn()`, `on_memory_write()`, `on_session_end()` — implemented
-- ✓ Tools: `muninn_search` (with memory_type + min_confidence), `muninn_profile` (dual query: preferences + identity), `muninn_remember` (concept + content + type + tags) — implemented
-- ✓ Circuit breaker: dual read/write gauges — implemented
-- ✓ HTTP session management via `requests.Session` with bearer auth — implemented
-- ✓ 12 memory type enums exposed to model via tool schemas — implemented
+- ✓ HydraDB: config, lifecycle, read/write paths, tools (hydradb_search, hydradb_profile, hydradb_conclude), circuit breaker
+- ✓ MuninnDB: config, lifecycle, read/write paths, tools (muninn_search, muninn_profile, muninn_remember), circuit breaker
+- ✓ Both providers extend BaseMemoryProvider — ~284 and ~384 lines respectively
+
+### Validated — Context Engines
+
+- ✓ HydraDB Context Engine: compress() pipeline, entity extraction (topics, decisions, facts, relationships), tools (hydradb_context_search, hydradb_context_expand), circuit breaker
+- ✓ MuninnDB Context Engine: compress() pipeline, 16 relationship types, tools (muninn_context_search, muninn_context_expand), synchronous execution
+- ✓ Both engines extend BaseContextEngine — ~973 and ~1007 lines respectively
+
+### Validated — Testing
+
+- ✓ 115 tests, zero failures, using fake backends
+- ✓ Tests cover: shared infra, config, circuit breaker, lifecycle, compress/entity extraction, tools
 
 ### Active
 
 - [ ] Live API verification: all MuninnDB REST calls confirmed against running MuninnDB instance
-- [ ] Test suite: fake clients for both providers
 - [ ] HydraDB provider: expose `recency_bias`, `alpha`, `metadata_filters` as tool params (cookbook research complete)
+- [ ] MuninnDB provider: live integration test suite
 
 ### Out of Scope
 
@@ -64,41 +69,44 @@ Persistent searchable memory that survives across Hermes sessions and profiles �
 - Same-turn write visibility cache — v2 enhancement
 - Batch query or memory deduplication — v2
 - Async SDK clients — sync-only per Hermes provider contract
-- Self-hosted HydraDB — cloud-only, free tier sufficient
 
 ## Context
 
-**HydraDB provider:** 735-line implementation at `hydradb-memory/__init__.py` — complete MemoryProvider with config, lifecycle, read/write paths, tools, session hooks, and dual circuit breaker. Plugin deployed in-tree and active on all Hermes profiles.
+**Codebase: ~4567 lines** across shared package + 4 plugins + tests.
 
-**MuninnDB provider:** 760-line implementation at `muninn-memory/__init__.py` — complete MemoryProvider backed by MuninnDB REST API. All cognitive features (ACT-R scoring, Hebbian learning, confidence tracking) are engine-native — the plugin is a thin HTTP adapter.
+**Shared infrastructure:** `cos_mcp/` — circuit_breaker.py (103 lines), base_provider.py (352), base_context_engine.py (341), backends/hydradb.py (245), backends/muninn.py (217), formatting/ (6 files, 542 lines total).
 
-**Research:** `research/hydradb-provider-design.md` (architecture blueprint), `research/hydradb-v2-research.md` (HydraDB API reference), `research/hermes-memory-provider-research.md` (provider contract research). Cookbook research completed for `recency_bias`, `alpha`, `metadata_filters`, `graph_context` enhancements.
+**Thin plugins:** hydradb-memory/ (284 lines), muninn-memory/ (384 lines), hydradb-context/ (973 lines), muninn-context/ (1007 lines).
+
+**Tests:** 115 tests across 7 modules using FakeMemoryBackend — no live API calls.
+
+**Research:** `research/hydradb-provider-design.md` (architecture blueprint), `research/hydradb-v2-research.md` (HydraDB API reference), `research/hermes-memory-provider-research.md` (provider contract research).
 
 **Codebase map:** `.planning/codebase/` (7 documents) — stack, architecture, structure, conventions, integrations, testing, concerns.
 
-**Target deployment:** `~/.hermes/hermes-agent/plugins/memory/hydradb/` and `.../muninn/` — in-tree plugins discovered by all profiles.
+**Target deployment:** Plugins copied to `~/.hermes/hermes-agent/plugins/memory/` and `~/.hermes/hermes-agent/plugins/context_engine/`.
 
 ## Constraints
 
 - **Tech stack:** Python 3.12+, sync only (no asyncio)
-- **Plugin contract:** Must implement Hermes Agent `MemoryProvider` ABC — never hardcode `~/.hermes`, use `hermes_home` kwarg
+- **Plugin contract:** Must implement Hermes Agent ABCs — never hardcode `~/.hermes`, use `hermes_home` kwarg
 - **Secrets:** API keys in `~/.hermes/.env`, never committed
-- **Tool naming:** Prefix memory tools with provider prefix to avoid core-tool collisions (`hydradb_*`, `muninn_*`)
+- **Tool naming:** Prefix tools with provider prefix to avoid core-tool collisions (`hydradb_*`, `muninn_*`)
 - **Memory format:** Clean prose extraction from retrieval results — no framing overhead
+- **Code style:** 4-space indent, Google-style docstrings, `from __future__ import annotations`, PEP 563
 
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
 |---|---|---|
-| Two providers, one ABC | Different trade-offs: cloud convenience vs cognitive depth. Swap by config. | ✓ Good |
-| In-tree plugins at `~/.hermes/hermes-agent/plugins/memory/` | Cross-profile — in-tree discovered by every profile | ✓ Good |
-| HydraDB: one tenant, one sub_tenant per profile | Start isolated, promote to "shared" for universal facts | ✓ Good |
-| Muninn: one vault per profile | Flat isolation model, no sub-tenant equivalent | ✓ Good |
-| Sync-only SDKs | Hermes providers are synchronous — no asyncio | ✓ Good |
-| Fire-and-forget writes on daemon threads | `sync_turn()` and `on_memory_write()` must not block | ✓ Good |
-| `queue_prefetch()` → background query, `prefetch()` returns cached | Same pattern as mem0 — read is non-blocking | ✓ Good |
+| Shared infrastructure + thin plugins | Eliminate ~60% code duplication between providers | ✓ Good |
+| BaseMemoryProvider / BaseContextEngine | Subclasses only define backend-specific config, tools, handlers | ✓ Good |
+| MemoryBackend ABC | Uniform interface — swap backends without changing provider code | ✓ Good |
+| MemoryFormatter / ContextFormatter ABCs | Backend-specific formatting isolated from provider/engine logic | ✓ Good |
 | Dual circuit breaker (read/write independent) | Read failures shouldn't block writes and vice versa | ✓ Good |
-| `sync_turn` uses `infer: true`, `on_memory_write` uses `infer: false` | Auto-extraction for conversation, verbatim for curated entries | ✓ Good |
+| Configurable breaker thresholds | Providers use 5 failures, context engines use 3 (lower I/O freq) | ✓ Good |
+| FakeBackend for tests | No live API calls — fast, deterministic, testable failure modes | ✓ Good |
+| hydradb-sdk vs requests.Session | Cloud SDK for HydraDB, sync HTTP for MuninnDB | ✓ Good |
 
 ## Evolution
 
@@ -119,4 +127,4 @@ This document evolves at phase transitions and milestone boundaries.
 
 ---
 
-*Last updated: 2026-06-20 — v1.1 milestone started*
+*Last updated: 2026-06-20 — v0.2.0 context engines complete, documentation pass*

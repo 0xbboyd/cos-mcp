@@ -1,153 +1,194 @@
 # Architecture
 
 **Analysis Date:** 2026-06-20
-**Updated:** 2026-06-20 — documentation pass (dual providers, dual circuit breaker)
+**Updated:** 2026-06-20 — documentation pass (shared infrastructure, context engines, tests)
 
 ## Pattern Overview
 
-**Overall:** Plugin / Provider pattern — two single-class implementations of the Hermes `MemoryProvider` ABC, each backed by a different memory engine.
+**Overall:** Shared infrastructure + thin plugins. The `cos_mcp` package provides base classes, backends, formatters, and a circuit breaker. Four thin plugins extend them — two memory providers, two context engines — each backed by a different storage engine (HydraDB Cloud or MuninnDB local).
 
-**HydraDB Provider** (`HydraDBMemoryProvider`, 735 lines):
-- Cloud-backed via HydraDB v2 API
-- Synchronous SDK client (`hydradb-sdk`)
-- Background daemon threads for non-blocking I/O
-- Lazy, thread-safe client singleton via double-checked locking
-- Dual circuit breaker (independent read/write gauges)
-- Fire-and-forget writes; prefetch / cache model for reads
-- Static tool schemas (OpenAI function-calling format)
+```
+cos_mcp/                          # Shared infrastructure (4567 lines)
+├── circuit_breaker.py            # Dual-gauge circuit breaker
+├── base_provider.py              # BaseMemoryProvider (MemoryProvider ABC)
+├── base_context_engine.py        # BaseContextEngine (ContextEngine ABC)
+├── backends/
+│   ├── base.py                   # MemoryBackend ABC
+│   ├── hydradb.py                # HydraDBBackend
+│   └── muninn.py                 # MuninnDBBackend
+└── formatting/
+    ├── base.py                   # MemoryFormatter ABC
+    ├── context_base.py           # ContextFormatter ABC
+    ├── hydradb.py                # HydraDBFormatter
+    ├── hydradb_context.py        # HydraDBContextFormatter
+    ├── muninn.py                 # MuninnDBFormatter
+    └── muninn_context.py         # MuninnDBContextFormatter
 
-**MuninnDB Provider** (`MuninnDBMemoryProvider`, 760 lines):
-- Local cognitive engine via MuninnDB REST API
-- Sync HTTP client (`requests.Session`)
-- All cognitive primitives engine-native (ACT-R scoring, Hebbian learning, Bayesian confidence, PAS, typed relationships)
-- Same threading/circuit-breaker/prefetch patterns as HydraDB provider
-- Richer tool schemas (12 memory types, confidence thresholds, concept+content split)
+hydradb-memory/                   # Thin HydraDB memory provider (~284 lines)
+muninn-memory/                    # Thin MuninnDB memory provider (~384 lines)
+plugins/context_engine/
+├── hydradb-context/              # Thin HydraDB context engine (~973 lines)
+└── muninn-context/               # Thin MuninnDB context engine (~1007 lines)
+```
 
-Both providers share the same architectural patterns — only the backend API differs.
+Every plugin follows the same pattern: subclass the base, create a backend + formatter, define tool schemas + handlers.
 
-## HydraDB Provider — Layers
+## Shared Infrastructure — `cos_mcp`
 
-### Config Layer
-- Purpose: Read and persist provider configuration
-- Contains: `_load_config()` (env + hydradb.json), `get_config_schema()` (field descriptors), `save_config()` (write non-secret config)
-- Depends on: `os.environ`, JSON file I/O
-- Used by: Lifecycle layer, Hermes CLI tooling
+### BaseMemoryProvider (MemoryProvider ABC)
 
-### Lifecycle Layer
-- Purpose: Provider registration, availability check, initialization
-- Contains: `name` ("hydradb"), `is_available()` (checks API key + SDK import), `initialize(session_id, **kwargs)` (captures identity, sets up threading, tenant auto-provisioning)
-- Depends on: Config layer, `hydra_db` SDK (optional import)
-- Used by: Hermes Agent runtime at startup
+The thick base that handles everything a memory provider needs — subclasses (hydradb-memory, muninn-memory) are thin adapters (~280-380 lines) that only define backend-specific config, tool schemas, handlers, and system prompt text.
 
-### Client Layer
-- Purpose: Manage the HydraDB SDK client instance
-- Contains: `_get_client()` — lazy, thread-safe singleton via `threading.Lock` (double-checked locking)
-- Depends on: `hydra_db.HydraDB` SDK class, `_api_key` from config
+**Layers:**
 
-### Tenant Provisioning
-- Purpose: Auto-create tenant on first run, poll until ready
-- Contains: `_ensure_tenant()` — create if missing (handles 409 conflict), poll `/tenants/status` every 5s up to 5 min
-- Depends on: Client layer, circuit breaker
-- Note: Creates `_tenant_ready` flag to skip subsequent calls
+- **Config Layer:** `_load_config_file()` (static helper — reads `{hermes_home}/{name}.json`, merges overrides), `get_config_schema()` + `save_config()` (override in subclass).
+- **Lifecycle Layer:** `is_available()` (classmethod, override), `initialize(session_id, **kwargs)` — captures identity, creates backend + formatter via subclass hooks, provisions backend, sets up circuit breaker and threading primitives.
+- **Read Path:** `system_prompt_block()` (static, override), `queue_prefetch(query)` — fires background daemon thread query, checks read breaker. `prefetch()` — returns cached result atomically, clears cache.
+- **Write Path:** `sync_turn(user, assistant)` — fire-and-forget ingest of turn pair (skips if agent_context != "primary"). `on_memory_write(action, target, content, metadata)` — mirrors built-in memory ops, uses content-hash IDs for deterministic upsert/delete. Both check write breaker.
+- **Tools Layer:** `get_tool_schemas()` (override), `handle_tool_call(name, args, **kwargs)` (override). Shared helpers: `_tool_search_impl(args, max_results, min_score, query_mode)`, `_tool_conclude_impl(args)`.
+- **Session Hooks:** `on_session_end(messages)` — ingests last 10 user/assistant messages as episodic memory (skips if agent_context != "primary"). `shutdown()` — joins background threads (5s timeout), calls `_backend.shutdown()`.
 
-### Read Path
-- Purpose: Retrieve relevant memories before each model turn
-- Contains: `system_prompt_block()` (static text), `queue_prefetch(query)` (background query), `prefetch()` (returns cached), `_format_chunks(result, min_score)` (clean prose extraction from SDK response)
-- Depends on: Client layer, circuit breaker (read gauge)
-- Note: `graph_context=True` is requested but query_paths are not surfaced in formatted output
+**Subclass contract (hydradb-memory, muninn-memory):**
+1. Set `name` class attr
+2. Implement `_create_backend(kwargs)` → MemoryBackend
+3. Implement `_create_formatter()` → MemoryFormatter
+4. Implement `is_available()` (classmethod)
+5. Implement `get_tool_schemas()`, `handle_tool_call()`, `system_prompt_block()`
+6. Implement `get_config_schema()`, `save_config()`
 
-### Write Path
-- Purpose: Persist conversation turns and memory writes into HydraDB
-- Contains: `sync_turn(user, assistant)` (ingests pair, `infer=True`), `on_memory_write(action, target, content, metadata)` (mirrors built-in ops, `infer=False`, content-hash IDs for deterministic upsert/delete)
-- Depends on: Client layer, circuit breaker (write gauge)
+### BaseContextEngine (ContextEngine ABC)
 
-### Tools Layer
-- Purpose: Expose memory operations to the model as function-calling tools
-- Contains: `get_tool_schemas()` ([SEARCH, PROFILE, CONCLUDE]), `handle_tool_call(name, args)` (dispatches to `_tool_search`, `_tool_profile`, `_tool_conclude`)
-- Depends on: Client layer
-- Note: `_tool_search` uses `mode="fast"` for lower latency; `_tool_profile` uses `mode="thinking"`
+The thick base that handles token tracking, compression gating, circuit breaker, and session lifecycle — subclasses (hydradb-context, muninn-context) add entity extraction, compress() assembly, and tool schemas/handlers.
 
-### Session Hooks
-- Purpose: Respond to session lifecycle events
-- Contains: `on_session_end(messages)` (ingests last 10 user/assistant messages as episodic memory), `shutdown()` (joins background threads with 5s timeout, clears client)
-- Depends on: Client layer, circuit breaker, threading primitives
+**Layers:**
 
-## MuninnDB Provider — Layers
+- **Lifecycle Layer:** `initialize(session_id, **kwargs)` — captures identity, creates backend + formatter via subclass hooks, sets up circuit breaker (lower threshold: 3 failures → 120s cooldown), tracks background threads.
+- **Token Tracking:** `update_from_response(usage)` — dual-format handling (canonical `input_tokens`/`output_tokens` + legacy `prompt_tokens`/`completion_tokens`). Cache tokens tracked separately, never counted toward prompt tokens. Recalculates `threshold_tokens` from `context_length * threshold_percent`.
+- **Compression Gate:** `should_compress(prompt_tokens)` — returns True when prompt tokens >= threshold. Uses `last_prompt_tokens` unless explicit override.
+- **Model Switch:** `update_model(model, context_length, ...)` — recalculates threshold when model changes.
+- **Session Lifecycle:** `on_session_start()` (subclass override), `on_session_end()` (subclass override), `on_session_reset()` (zeros counters), `shutdown()` (joins threads 30s, calls `_backend.shutdown()`).
+- **compress():** Raises NotImplementedError — subclasses MUST override with full pipeline.
+- **Tools:** `get_tool_schemas()` (subclass override), `handle_tool_call()` (subclass override).
+- **Config:** `_load_config_file()` (static helper — same pattern as BaseMemoryProvider).
 
-### Config Layer
-- Purpose: Read and persist provider configuration
-- Contains: `_load_config()` (env + muninn.json), `get_config_schema()` (field descriptors), `save_config()`
-- Config keys: `base_url` (default `http://127.0.0.1:8475`), `vault` (default `"default"`), `api_key` (optional for default vault)
-- Depends on: `os.environ`, JSON file I/O
+**Subclass contract (hydradb-context, muninn-context):**
+1. Set `name` class attr
+2. Implement `_create_backend(kwargs)` → MemoryBackend (same interface as memory providers)
+3. Implement `_create_formatter()` → ContextFormatter
+4. Implement `is_available()` (classmethod)
+5. Implement `compress(messages, current_tokens, focus_topic)` → list of messages
+6. Implement entity extraction, tool schemas, tool handlers
 
-### Lifecycle Layer
-- Purpose: Provider registration, availability check, initialization
-- Contains: `name` ("muninn"), `is_available()` (checks `requests` import), `initialize()` (loads config, creates HTTP session with bearer auth)
-- Simpler than HydraDB — no tenant provisioning (MuninnDB creates vaults on first write)
+### Backend Abstraction (MemoryBackend ABC)
 
-### HTTP Client Layer
-- Purpose: Sync HTTP client for MuninnDB REST API
-- Contains: `_session` (`requests.Session`), `_post()` (POST helper), `_get()` (GET helper), `_health_check()` (GET /api/health)
-- Uses bearer auth header when `MUNINN_API_KEY` is set
+Uniform interface for storage engines. Six methods:
 
-### Read Path
-- Purpose: Retrieve relevant memories via MuninnDB ACTIVATE pipeline
-- Contains: `system_prompt_block()` (static text describing cognitive features), `queue_prefetch()` (background ACTIVATE via daemon thread), `prefetch()` (returns cached activations), `_activate()` (POST /api/activate), `_format_activations()` (concept headers, confidence warnings, dormant filtering)
-- Key difference: Uses `context` array for semantic search, supports `memory_type` filter and `threshold` at API level
-- Note: All cognitive scoring (ACT-R, Hebbian boosting, PAS injection) happens in MuninnDB engine — no plugin-level formatting logic needed
+| Method | Signature | Purpose |
+|--------|-----------|---------|
+| `query` | `(query_text, max_results, query_mode, query_by, graph_context, memory_type, min_confidence)` | Search memory, returns backend-native result |
+| `ingest` | `(text, infer, user_name, metadata, memory_id, memory_type_label, tags, confidence)` | Store a memory entry |
+| `delete` | `(memory_id)` | Delete by ID |
+| `health_check` | `()` | Connectivity check, returns bool |
+| `provision` | `()` | Ensure backend is ready (create tenants, vaults, etc.), returns bool |
+| `shutdown` | `()` | Release resources |
 
-### Write Path
-- Purpose: Persist memories as engrams in MuninnDB
-- Contains: `sync_turn()` (ingests turn as event engram), `on_memory_write()` (mirrors built-in ops as fact/preference engrams), `_write_engram()` (POST /api/engrams with concept, content, tags, type_label, confidence)
-- Key difference: Uses concept+content split (Muninn's memory model), tags for auto-association, type_label for classification
+**HydraDBBackend** — wraps `hydradb-sdk` sync client. Lazy thread-safe singleton via double-checked locking. Tenant auto-provisioning: creates tenant if missing (handles 409 conflict), polls until `ready_for_ingestion` (5s interval, 5min max). `upsert="true"` (string, not bool). Metadata JSON-encoded string.
 
-### Tools Layer
-- Purpose: Expose cognitive memory operations to the model
-- Contains: `get_tool_schemas()` ([SEARCH, PROFILE, REMEMBER]), `handle_tool_call()` (dispatches to `_tool_search`, `_tool_profile`, `_tool_remember`)
-- Key differences from HydraDB:
-  - `muninn_search`: supports `memory_type` filter (12 built-in types), `min_confidence` threshold
-  - `muninn_profile`: dual query — preferences (memory_type=preference) + identity (memory_type=identity)
-  - `muninn_remember`: structured input (concept+content+type+tags) instead of flat text
-  - All 12 memory types listed in tool schema enums
+**MuninnDBBackend** — wraps MuninnDB REST API via `requests.Session`. Trims content to 15KB limit. Tags normalized to hyphenated-lowercase. Automatic `hermes-context` / `hermes-memory` tagging for data segregation. Delete is a no-op (MuninnDB API limitation). Provision just health-checks; vaults created via CLI.
 
-### Session Hooks
-- Same pattern as HydraDB: `on_session_end()` ingests session summary, `shutdown()` drains threads and closes HTTP session
+### Formatter Abstractions
 
-## Cross-Cutting Concerns (Both Providers)
+**MemoryFormatter ABC** — single method `format(result, min_score)` → clean prose text. Backend-specific implementations know the shape of response objects.
+
+**ContextFormatter ABC** — three methods for context operations:
+- `format_compress_summary(result)` — formats entity lists for system message insertion
+- `format_search_result(result, min_score)` — formats search results with graph/cognitive annotations
+- `format_expand_result(result)` — formats ctx-id expansion with traversal paths
+
+**HydraDBFormatter** — extracts `chunk_content` from SDK response `result.data.chunks`, filters by `relevancy_score >= min_score`.
+
+**HydraDBContextFormatter** — adds graph context annotations: `[ctx-id: ...]` anchors, hop depth, relationship edges, multi-hop path traversal with hierarchical indentation.
+
+**MuninnDBFormatter** — formats activation dicts with concept headers, confidence warnings (`[confidence: X%]` for scores < 0.6), dormant entry filtering.
+
+**MuninnDBContextFormatter** — adds cognitive annotations: confidence weights, memory type labels, ACT-R activation chains, Bayesian confidence gating.
 
 ### Circuit Breaker
-- **Dual independent gauges** — read failures don't trip write breaker and vice versa
-- Each gauge: 5 consecutive failures → 120s cooldown
-- Read gauge guards: `queue_prefetch`, `_tool_search`, `_tool_profile`
-- Write gauge guards: `sync_turn`, `on_memory_write`, `_tool_remember`/`_tool_conclude`, `on_session_end`
-- State: `_read_failures`, `_write_failures` (int), `_read_breaker_open_until`, `_write_breaker_open_until` (epoch float)
-- All gauge state protected by `_breaker_lock` (threading.Lock)
+
+Dual-gauge with independent read/write tracking. Configurable thresholds (`failure_threshold`, `cooldown_seconds`). Thread-safe via `_lock`.
+
+- **Memory providers:** 5 failures → 120s cooldown (default).
+- **Context engines:** 3 failures → 120s cooldown (lower I/O frequency, faster trip).
+- Read gauge guards: `queue_prefetch`, tool search/profile calls.
+- Write gauge guards: `sync_turn`, `on_memory_write`, tool conclude/remember calls, `on_session_end`.
+- A single success resets the counter and closes the breaker.
+
+## HydraDB Memory Provider (`hydradb-memory/`)
+
+Thin adapter (~284 lines) extending BaseMemoryProvider. Config: `HYDRA_DB_API_KEY` env + `~/.hermes/hydradb.json`. Tools: `hydradb_search`, `hydradb_profile`, `hydradb_conclude`. Backend: `HydraDBBackend`. Formatter: `HydraDBFormatter`.
+
+## MuninnDB Memory Provider (`muninn-memory/`)
+
+Thin adapter (~384 lines) extending BaseMemoryProvider. Config: `MUNINN_API_KEY` env + `~/.hermes/muninn.json`. Tools: `muninn_search` (with memory_type + min_confidence), `muninn_profile` (dual query: preferences + identity), `muninn_remember` (concept + content + type + tags, 12 memory type enums). Backend: `MuninnDBBackend`. Formatter: `MuninnDBFormatter`.
+
+## HydraDB Context Engine (`plugins/context_engine/hydradb-context/`)
+
+Thin adapter (~973 lines) extending BaseContextEngine. Full compress() pipeline:
+
+1. **Entity Extraction** — Pure Python heuristics (no LLM). Extracts topics (capitalized phrases, quoted phrases with frequency scoring), decisions (marker-word matching), facts (copula detection), relationships (verb patterns). Configurable modes: conservative/balanced/aggressive. Per-message cap, global trigram Jaccard dedup.
+2. **Fire-and-forget graph ingest** — Entities written to HydraDB on daemon thread (`_entity_thread`), tagged as `type=context` for data segregation. Generates stable ctx-id anchors from content hash.
+3. **Summary block assembly** — Formatted entity list inserted as system message, replacing compressed message window.
+
+Tools: `hydradb_context_search` (graph-aware search), `hydradb_context_expand` (ctx-id expansion with multi-hop traversal).
+
+## MuninnDB Context Engine (`plugins/context_engine/muninn-context/`)
+
+Thin adapter (~1007 lines) extending BaseContextEngine. Similar compress() pipeline but synchronous (local REST API, no daemon threads). Uses MuninnDB's 16 relationship types for cognitive entity classification. Tools: `muninn_context_search` (with Bayesian confidence gating), `muninn_context_expand` (activation chain expansion).
+
+## Cross-Cutting Concerns
 
 ### Thread Safety
-- Client protected by `threading.Lock` with double-checked locking (HydraDB) / HTTP session reused (MuninnDB)
-- Prefetch result protected by `threading.Lock` (atomic get + clear)
-- Circuit breaker counters accessed under `_breaker_lock`
+- Backend clients: HydraDB uses double-checked locking singleton; MuninnDB reuses `requests.Session`.
+- Prefetch result: `threading.Lock` (atomic get + clear).
+- Circuit breaker: all state transitions under `_lock`.
+- Background threads tracked for shutdown join.
 
 ### Error Handling
-- Fail-open: all exceptions caught, logged at DEBUG, silently discarded
-- Tool calls return JSON `{"error": str(e)}` — model sees error, agent continues
-- Daemon threads silently terminate on exception
-- Config errors catch `JSONDecodeError` + `OSError`, log warning, return defaults
+- **Fail-open:** all exceptions caught, logged at DEBUG, silently discarded.
+- Tool calls return JSON `{"error": str(e)}` — model sees error, agent continues.
+- Daemon threads silently terminate on exception.
+- Config errors: `JSONDecodeError` + `OSError` caught, log warning, return defaults.
 
 ### Logging
-- Standard `logging.getLogger(__name__)` — module-level logger
-- INFO: initialization details (vault/tenant, mode)
-- WARNING: config load failures, circuit breaker open
-- DEBUG: I/O failures (prefetch, sync_turn, on_memory_write, on_session_end) with exc_info=True
+- Standard `logging.getLogger(__name__)` — module-level logger.
+- INFO: initialization details (tenant/vault, mode, agent context).
+- WARNING: config load failures, circuit breaker open.
+- DEBUG: I/O failures (prefetch, sync_turn, on_memory_write, on_session_end) with `exc_info=True`.
+- `printf`-style formatting: `logger.info("text %s", value)` — no f-strings.
 
 ### Configuration
-- Secrets: environment variables only (`HYDRA_DB_API_KEY`, `MUNINN_API_KEY`)
-- Non-secret config: JSON files in `$HERMES_HOME` (`hydradb.json`, `muninn.json`) merge over module-level `DEFAULT_CONFIG`
-- HydraDB: `sub_tenant_id` auto-resolves to profile name for per-profile isolation
-- MuninnDB: `vault` defaults to `"default"` — use per-profile vault names for isolation
+- Secrets: environment variables only (`HYDRA_DB_API_KEY`, `MUNINN_API_KEY`).
+- Non-secret config: JSON files in `$HERMES_HOME` (`hydradb.json`, `muninn.json`, `hydradb-context.json`, `muninn-context.json`) merge over module-level `DEFAULT_CONFIG`.
+- HydraDB: `sub_tenant_id` auto-resolves to profile name for per-profile isolation.
+- MuninnDB: `vault` defaults to `"default"` — use per-profile vault names for isolation.
 
 ### Agent Context Guard
-- `sync_turn` and `on_session_end` skip if `_agent_context != "primary"` — prevents cron/subagent/flush contexts from polluting memory
+- `sync_turn` and `on_session_end` skip if `_agent_context != "primary"` — prevents cron/subagent/flush contexts from polluting memory.
+- Context engines track `_agent_context` but don't gate writes (context compression runs for all contexts).
+
+### Data Segregation
+- HydraDB: `type=memory` for memory provider entries, `type=context` for context engine entries.
+- MuninnDB: `hermes-memory` tag for provider entries, `hermes-context` tag for context engine entries.
+
+## Test Architecture
+
+Tests at `tests/plugins/context_engine/` (6 modules, 115 tests) and `tests/plugins/memory/` (1 module). Use **fake backends** (no live API calls):
+
+- `conftest.py` provides `FakeMemoryBackend` — in-memory dict store implementing `MemoryBackend` ABC. Supports query (substring match), ingest, delete, health_check, provision.
+- Circuit breaker tests: mock `time.time()` for deterministic cooldown behavior.
+- Config tests: temp dirs via `tmp_path`, environment variable monkeypatching.
+- Entity extraction tests: known input → expected entity list assertions.
+- Lifecycle tests: verify thread tracking, shutdown drain, session reset.
 
 ---
 
