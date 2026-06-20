@@ -1,0 +1,12 @@
+name: muninn-context
+version: 0.1.0
+plugin_type: context_engine
+description: "MuninnDB cognitive context engine — ACT-R temporal decay, Hebbian co-activation, and Bayesian confidence for neuroscience-inspired context compression and retrieval."
+pip_dependencies:
+  - requests>=2.31
+  - cos-mcp>=0.2.0
+requires_env:
+  - MUNINN_API_KEY
+hooks:
+  - on_session_start
+  - on_session_end
