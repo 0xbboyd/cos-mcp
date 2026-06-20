@@ -126,6 +126,7 @@ class HydraDBMemoryProvider(BaseMemoryProvider):
     """
 
     name = "hydradb"
+    heading_label = "HydraDB"
 
     # --- Lifecycle ----------------------------------------------------------
 

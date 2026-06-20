@@ -11,13 +11,17 @@ only available inside the Hermes Agent runtime. Import it directly from
 from cos_mcp.circuit_breaker import CircuitBreaker
 from cos_mcp.backends.base import MemoryBackend
 from cos_mcp.backends.hydradb import HydraDBBackend
+from cos_mcp.backends.muninn import MuninnDBBackend
 from cos_mcp.formatting.base import MemoryFormatter
 from cos_mcp.formatting.hydradb import HydraDBFormatter
+from cos_mcp.formatting.muninn import MuninnDBFormatter
 
 __all__ = [
     "CircuitBreaker",
     "MemoryBackend",
     "HydraDBBackend",
+    "MuninnDBBackend",
     "MemoryFormatter",
     "HydraDBFormatter",
+    "MuninnDBFormatter",
 ]

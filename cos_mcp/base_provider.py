@@ -114,7 +114,8 @@ class BaseMemoryProvider(MemoryProvider):
             self._prefetch_result = ""
         if not result:
             return ""
-        return f"## {self.name.title()} Memory\n{result}"
+        heading = getattr(self, "heading_label", self.name.title())
+        return f"## {heading} Memory\n{result}"
 
     def queue_prefetch(self, query: str, *, session_id: str = "") -> None:
         """Fire a background memory query for the upcoming turn."""

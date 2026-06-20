@@ -2,7 +2,37 @@
 
 Memory provider plugins for Hermes Agent — persistent, cross-session memory with cognitive retrieval.
 
-Two providers:
+## Architecture (v0.2.0)
+
+Shared infrastructure extracted into the `cos_mcp` package:
+
+```
+cos_mcp/                    # Shared package
+  circuit_breaker.py        # Dual-gauge circuit breaker (read/write)
+  base_provider.py          # BaseMemoryProvider — threading, config, lifecycle
+  backends/
+    base.py                 # MemoryBackend ABC
+    hydradb.py              # HydraDBBackend (SDK wrapper)
+    muninn.py               # MuninnDBBackend (REST API wrapper)
+  formatting/
+    base.py                 # MemoryFormatter ABC
+    hydradb.py              # HydraDB chunk extractor
+    muninn.py               # MuninnDB activation formatter
+
+hydradb-memory/             # Thin HydraDB provider (~280 lines)
+  __init__.py
+  plugin.yaml
+
+muninn-memory/              # Thin MuninnDB provider (~400 lines)
+  __init__.py
+  plugin.yaml
+```
+
+Each provider is now a thin adapter — backend-specific tool schemas, handlers,
+config, and system prompt block. All shared infrastructure (circuit breaker,
+threading, config loading pattern, read/write path) lives in `cos_mcp`.
+
+## Providers
 
 | Provider | Backend | Cognitive Features | Deployment |
 |---|---|---|---|
@@ -14,6 +44,9 @@ Two providers:
 ### HydraDB (Cloud)
 
 ```bash
+# Install shared package
+pip install cos-mcp hydradb-sdk
+
 # Copy plugin in-tree
 cp -r hydradb-memory/ ~/.hermes/hermes-agent/plugins/memory/hydradb/
 
@@ -27,6 +60,9 @@ hermes memory setup hydradb
 ### MuninnDB (Local)
 
 ```bash
+# Install shared package
+pip install cos-mcp requests
+
 # Install and start MuninnDB
 curl -sSL https://muninndb.com/install.sh | sh
 muninn start
@@ -38,21 +74,14 @@ cp -r muninn-memory/ ~/.hermes/hermes-agent/plugins/memory/muninn/
 hermes memory setup muninn
 ```
 
-## Files
+## Development
 
-```
-hydradb-memory/          # HydraDB provider (735 lines)
-  __init__.py            # HydraDBMemoryProvider(MemoryProvider)
-  plugin.yaml            # Manifest: hydradb-sdk>=2,<3
+```bash
+# Install in dev mode
+pip install -e .
 
-muninn-memory/           # MuninnDB provider (760 lines)
-  __init__.py            # MuninnDBMemoryProvider(MemoryProvider)
-  plugin.yaml            # Manifest: requests>=2.31
-
-research/                # Architecture docs & API reference
-  hydradb-provider-design.{md,html}
-  hydradb-v2-research.md
-  hermes-memory-provider-research.md
+# Run tests (future)
+python -m pytest
 ```
 
 ## Choosing a Provider
