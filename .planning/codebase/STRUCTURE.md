@@ -32,16 +32,19 @@ cos-mcp/
 │   └── SPEC.md                        # Specification and roadmap
 ├── muninn-memory/                     # MuninnDB memory provider plugin
 │   ├── __init__.py                    # MuninnDBMemoryProvider (384 lines)
-│   └── plugin.yaml                    # Hermes plugin manifest
+│   ├── plugin.yaml                    # Hermes plugin manifest
+│   └── README.md                      # User-facing setup guide
 ├── plugins/                           # In-tree plugin directory
 │   └── context_engine/
 │       ├── __init__.py                # (empty)
 │       ├── hydradb-context/
 │       │   ├── __init__.py            # HydraDBContextEngine (973 lines)
-│       │   └── plugin.yaml            # Hermes plugin manifest
+│       │   ├── plugin.yaml            # Hermes plugin manifest
+│       │   └── README.md              # User-facing setup and usage guide
 │       └── muninn-context/
 │           ├── __init__.py            # MuninnDBContextEngine (1007 lines)
-│           └── plugin.yaml            # Hermes plugin manifest
+│           ├── plugin.yaml            # Hermes plugin manifest
+│           └── README.md              # User-facing setup and usage guide
 ├── tests/                             # Test suites
 │   ├── __init__.py
 │   ├── plugins/
