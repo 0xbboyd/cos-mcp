@@ -1,0 +1,976 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HydraDB Memory Provider — Architecture Design</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --bg-card: #161b22;
+    --bg-code: #0a0e14;
+    --border: #30363d;
+    --text: #c9d1d9;
+    --text-dim: #8b949e;
+    --text-bright: #f0f6fc;
+    --accent: #58a6ff;
+    --accent-dim: #1f6feb;
+    --green: #3fb950;
+    --orange: #d29922;
+    --red: #f85149;
+    --purple: #bc8cff;
+    --cyan: #39d2c0;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, 'Segoe UI', 'Noto Sans', sans-serif;
+    line-height: 1.7;
+    font-size: 15px;
+  }
+  /* Layout */
+  .layout { display: flex; max-width: 1400px; margin: 0 auto; }
+  .sidebar {
+    position: sticky; top: 0; height: 100vh; width: 260px;
+    border-right: 1px solid var(--border);
+    padding: 24px 20px; overflow-y: auto;
+    flex-shrink: 0;
+  }
+  .sidebar h2 { font-size: 14px; color: var(--text-dim); margin-bottom: 12px; text-transform: uppercase; letter-spacing: 1px; }
+  .sidebar nav a {
+    display: block; padding: 6px 12px; color: var(--text-dim);
+    text-decoration: none; font-size: 13px; border-radius: 6px;
+    border-left: 2px solid transparent; margin-bottom: 2px;
+    transition: all 0.15s;
+  }
+  .sidebar nav a:hover { color: var(--accent); background: rgba(88,166,255,0.08); }
+  .sidebar nav a.active { color: var(--accent); border-left-color: var(--accent); background: rgba(88,166,255,0.06); }
+  .content { padding: 40px 48px; flex: 1; min-width: 0; }
+
+  /* Typography */
+  h1 { font-size: 28px; color: var(--text-bright); margin-bottom: 8px; }
+  h2 {
+    font-size: 22px; color: var(--text-bright); margin-top: 48px;
+    margin-bottom: 16px; padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  h3 { font-size: 17px; color: var(--text-bright); margin-top: 32px; margin-bottom: 12px; }
+  h4 { font-size: 15px; color: var(--accent); margin-top: 20px; margin-bottom: 8px; }
+  p { margin-bottom: 14px; }
+  a { color: var(--accent); text-decoration: none; }
+  ul, ol { margin-bottom: 14px; padding-left: 24px; }
+  li { margin-bottom: 4px; }
+  code { font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 13px; }
+  p > code, li > code {
+    background: rgba(110,118,129,0.2); padding: 2px 6px;
+    border-radius: 4px; color: var(--orange);
+  }
+  pre {
+    background: var(--bg-code); border: 1px solid var(--border);
+    border-radius: 8px; padding: 16px 20px; overflow-x: auto;
+    margin-bottom: 16px; font-size: 13px; line-height: 1.5;
+  }
+  pre code { color: var(--text); }
+  blockquote {
+    border-left: 3px solid var(--accent-dim);
+    background: rgba(31,111,235,0.08);
+    padding: 12px 18px; margin: 16px 0; border-radius: 0 8px 8px 0;
+  }
+  blockquote p { margin: 0; color: var(--text-dim); }
+
+  /* Tables */
+  table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+  th, td { padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--border); font-size: 14px; }
+  th { color: var(--text-bright); font-weight: 600; background: var(--bg-card); }
+  td { color: var(--text); }
+  td code { color: var(--cyan); }
+
+  /* Cards */
+  .card {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 12px; padding: 24px; margin: 24px 0;
+  }
+  .decision-grid { display: grid; gap: 12px; }
+  .decision-item {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 8px; padding: 14px 18px;
+  }
+  .decision-item strong { color: var(--accent); }
+
+  /* Diagrams */
+  .diagram {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px; margin: 24px 0;
+    text-align: center;
+  }
+  .diagram svg { max-width: 100%; height: auto; }
+  .diagram-label { color: var(--text-dim); font-size: 13px; margin-top: 8px; }
+
+  /* Badges */
+  .badge {
+    display: inline-block; padding: 3px 10px; border-radius: 12px;
+    font-size: 11px; font-weight: 600; letter-spacing: 0.5px;
+    text-transform: uppercase;
+  }
+  .badge-green { background: rgba(63,185,80,0.15); color: var(--green); border: 1px solid rgba(63,185,80,0.3); }
+  .badge-orange { background: rgba(210,153,34,0.15); color: var(--orange); border: 1px solid rgba(210,153,34,0.3); }
+  .badge-red { background: rgba(248,81,73,0.15); color: var(--red); border: 1px solid rgba(248,81,73,0.3); }
+  .badge-blue { background: rgba(88,166,255,0.15); color: var(--accent); border: 1px solid rgba(88,166,255,0.3); }
+  .badge-purple { background: rgba(188,140,255,0.15); color: var(--purple); border: 1px solid rgba(188,140,255,0.3); }
+
+  /* Callout */
+  .callout {
+    border-left: 3px solid; padding: 12px 18px; margin: 16px 0;
+    border-radius: 0 8px 8px 0;
+  }
+  .callout-warn { border-color: var(--orange); background: rgba(210,153,34,0.06); }
+  .callout-info { border-color: var(--accent); background: rgba(88,166,255,0.06); }
+  .callout p { margin: 0; }
+  .callout strong { color: var(--text-bright); }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: #484f58; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <h2>Architecture</h2>
+    <nav>
+      <a href="#overview">1. Design Decisions</a>
+      <a href="#topology">Topology Diagram</a>
+      <a href="#files">2. File Layout</a>
+      <a href="#components">3. Component Architecture</a>
+      <a href="#methods">4. Method Specification</a>
+      <a href="#read-flow">5. Read Flow</a>
+      <a href="#write-flow">5. Write Flow</a>
+      <a href="#evolution">5. Evolution Path</a>
+      <a href="#breaker">6. Circuit Breaker</a>
+      <a href="#tenant">7. Tenant Provisioning</a>
+      <a href="#sdk">8. SDK Reference</a>
+      <a href="#testing">9. Testing</a>
+      <a href="#questions">10. Open Questions</a>
+    </nav>
+  </aside>
+
+  <!-- Content -->
+  <main class="content">
+
+<h1>HydraDB Memory Provider — Architecture Design</h1>
+<p style="color: var(--text-dim); margin-bottom: 24px;">
+  A Hermes Agent memory provider plugin backed by HydraDB v2, shared across all profiles.
+</p>
+
+<div class="card">
+  <p style="margin:0;color:var(--text-dim);">
+    <strong style="color:var(--text-bright);">Research inputs:</strong><br>
+    <code>research/hermes-memory-provider-research.md</code> — the MemoryProvider ABC contract<br>
+    <code>research/hydradb-v2-research.md</code> — the HydraDB v2 API surface<br>
+    Verified SDK signatures from <code>hydradb-sdk==2.0.1</code> (installed in Hermes venv)
+  </p>
+</div>
+
+<!-- ============================== -->
+<!-- 1. DESIGN DECISIONS            -->
+<!-- ============================== -->
+<h2 id="overview">1. Design Decisions</h2>
+
+<div class="decision-grid">
+  <div class="decision-item">
+    <strong>Plugin location</strong> — In-tree: <code>~/.hermes/hermes-agent/plugins/memory/hydradb/</code><br>
+    <span style="color:var(--text-dim);">Cross-profile requirement — in-tree is discovered by every profile. User-installed is per-profile only.</span>
+  </div>
+  <div class="decision-item">
+    <strong>Memory topology</strong> — One tenant, one <code>sub_tenant_id</code> per profile (1:1)<br>
+    <span style="color:var(--text-dim);">Start isolated — each profile's memories are scoped to its own sub-tenant. When shared concepts emerge, promote them to a <code>"shared"</code> sub-tenant. Sub-tenants are implicit in HydraDB (just a string), so this needs no schema change.</span>
+  </div>
+  <div class="decision-item">
+    <strong>SDK client</strong> — <code>HydraDB</code> (sync), NOT <code>AsyncHydraDB</code><br>
+    <span style="color:var(--text-dim);">Hermes memory providers are synchronous (no asyncio). The sync client's methods block on HTTP I/O.</span>
+  </div>
+  <div class="decision-item">
+    <strong>Write path</strong> — Fire-and-forget on daemon threads<br>
+    <span style="color:var(--text-dim);"><code>sync_turn()</code> and <code>on_memory_write()</code> must be non-blocking. HydraDB ingestion is async (seconds to index).</span>
+  </div>
+  <div class="decision-item">
+    <strong>Read path</strong> — <code>queue_prefetch()</code> → background query, <code>prefetch()</code> returns cached<br>
+    <span style="color:var(--text-dim);">Same pattern as mem0. <code>prefetch()</code> returns stashed result; the actual HydraDB query runs in <code>queue_prefetch()</code>.</span>
+  </div>
+  <div class="decision-item">
+    <strong>Circuit breaker</strong> — 5 consecutive failures → 120s cooldown<br>
+    <span style="color:var(--text-dim);">Cloud provider; same pattern as mem0. Prevents hammering a down API.</span>
+  </div>
+  <div class="decision-item">
+    <strong>infer mode</strong> — <code>sync_turn</code> uses <code>infer: true</code>; <code>on_memory_write</code> uses <code>infer: false</code><br>
+    <span style="color:var(--text-dim);">sync_turn sends raw conversation — HydraDB extracts durable facts. on_memory_write mirrors curated built-in entries — store verbatim.</span>
+  </div>
+  <div class="decision-item">
+    <strong>Tools</strong> — <code>hydradb_search</code>, <code>hydradb_profile</code>, <code>hydradb_conclude</code><br>
+    <span style="color:var(--text-dim);">Same three-tool pattern as mem0. Prefixed to avoid core-tool-name collisions.</span>
+  </div>
+</div>
+
+<!-- ============================== -->
+<!-- TOPOLOGY DIAGRAM               -->
+<!-- ============================== -->
+<h3 id="topology">Memory Topology</h3>
+<div class="diagram">
+<svg viewBox="0 0 800 520" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="tenantGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#1f6feb;stop-opacity:0.15"/>
+      <stop offset="100%" style="stop-color:#1f6feb;stop-opacity:0.05"/>
+    </linearGradient>
+    <linearGradient id="subGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#238636;stop-opacity:0.1"/>
+      <stop offset="100%" style="stop-color:#238636;stop-opacity:0.03"/>
+    </linearGradient>
+    <linearGradient id="sharedGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#bc8cff;stop-opacity:0.1"/>
+      <stop offset="100%" style="stop-color:#bc8cff;stop-opacity:0.03"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Tenant container -->
+  <rect x="20" y="20" width="760" height="480" rx="16" fill="url(#tenantGrad)" stroke="#1f6feb" stroke-width="2" stroke-dasharray="8,4"/>
+  <text x="400" y="50" text-anchor="middle" fill="#58a6ff" font-size="18" font-weight="700" font-family="sans-serif">HydraDB Tenant: "hermes"</text>
+  <text x="400" y="70" text-anchor="middle" fill="#8b949e" font-size="12" font-family="sans-serif">One shared tenant — the provisioning boundary (create once, poll until ready)</text>
+
+  <!-- Sub-tenant: bridgetrader -->
+  <rect x="40" y="95" width="220" height="180" rx="12" fill="url(#subGrad)" stroke="#238636" stroke-width="1.5"/>
+  <text x="150" y="122" text-anchor="middle" fill="#3fb950" font-size="14" font-weight="600" font-family="sans-serif">sub_tenant_id="bridgetrader"</text>
+  <text x="150" y="145" text-anchor="middle" fill="#8b949e" font-size="11" font-family="sans-serif">Profile: bridgetrader</text>
+  <rect x="55" y="160" width="190" height="28" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+  <text x="150" y="178" text-anchor="middle" fill="#c9d1d9" font-size="11" font-family="monospace">IBKR port 4002, paper DUM583618</text>
+  <rect x="55" y="195" width="190" height="28" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+  <text x="150" y="213" text-anchor="middle" fill="#c9d1d9" font-size="11" font-family="monospace">NT Rust logger panic fix</text>
+  <rect x="55" y="230" width="190" height="28" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+  <text x="150" y="248" text-anchor="middle" fill="#c9d1d9" font-size="11" font-family="monospace">ZEBRA top performer SI $62k</text>
+
+  <!-- Sub-tenant: dotfiles -->
+  <rect x="290" y="95" width="220" height="180" rx="12" fill="url(#subGrad)" stroke="#238636" stroke-width="1.5"/>
+  <text x="400" y="122" text-anchor="middle" fill="#3fb950" font-size="14" font-weight="600" font-family="sans-serif">sub_tenant_id="dotfiles"</text>
+  <text x="400" y="145" text-anchor="middle" fill="#8b949e" font-size="11" font-family="sans-serif">Profile: dotfiles</text>
+  <rect x="305" y="160" width="190" height="28" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+  <text x="400" y="178" text-anchor="middle" fill="#c9d1d9" font-size="11" font-family="monospace">Symlink ~/src/dotfiles → ~/.config</text>
+  <rect x="305" y="195" width="190" height="28" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+  <text x="400" y="213" text-anchor="middle" fill="#c9d1d9" font-size="11" font-family="monospace">WezTerm + zsh + p10k setup</text>
+  <rect x="305" y="230" width="190" height="28" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+  <text x="400" y="248" text-anchor="middle" fill="#c9d1d9" font-size="11" font-family="monospace">chmod 755 shell scripts</text>
+
+  <!-- Sub-tenant: journal -->
+  <rect x="540" y="95" width="220" height="180" rx="12" fill="url(#subGrad)" stroke="#238636" stroke-width="1.5"/>
+  <text x="650" y="122" text-anchor="middle" fill="#3fb950" font-size="14" font-weight="600" font-family="sans-serif">sub_tenant_id="journal"</text>
+  <text x="650" y="145" text-anchor="middle" fill="#8b949e" font-size="11" font-family="sans-serif">Profile: journal</text>
+  <rect x="555" y="160" width="190" height="28" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+  <text x="650" y="178" text-anchor="middle" fill="#c9d1d9" font-size="11" font-family="monospace">Reflective prose, not corporate</text>
+  <rect x="555" y="195" width="190" height="28" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+  <text x="650" y="213" text-anchor="middle" fill="#c9d1d9" font-size="11" font-family="monospace">Honest, not flattering</text>
+  <rect x="555" y="230" width="190" height="28" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+  <text x="650" y="248" text-anchor="middle" fill="#c9d1d9" font-size="11" font-family="monospace">Match user's voice</text>
+
+  <!-- Shared sub-tenant (future) -->
+  <rect x="180" y="310" width="440" height="160" rx="12" fill="url(#sharedGrad)" stroke="#bc8cff" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <text x="400" y="338" text-anchor="middle" fill="#bc8cff" font-size="14" font-weight="600" font-family="sans-serif">sub_tenant_id="shared" (future evolution)</text>
+  <text x="400" y="358" text-anchor="middle" fill="#8b949e" font-size="11" font-family="sans-serif">Promote universal facts when shared taxonomy is understood</text>
+  <rect x="200" y="372" width="120" height="26" rx="6" fill="#161b22" stroke="#bc8cff" stroke-width="0.5" stroke-opacity="0.4"/>
+  <text x="260" y="389" text-anchor="middle" fill="#bc8cff" font-size="10" font-family="monospace">User: bboyd</text>
+  <rect x="330" y="372" width="120" height="26" rx="6" fill="#161b22" stroke="#bc8cff" stroke-width="0.5" stroke-opacity="0.4"/>
+  <text x="390" y="389" text-anchor="middle" fill="#bc8cff" font-size="10" font-family="monospace">Prefers TTS driving</text>
+  <rect x="460" y="372" width="140" height="26" rx="6" fill="#161b22" stroke="#bc8cff" stroke-width="0.5" stroke-opacity="0.4"/>
+  <text x="530" y="389" text-anchor="middle" fill="#bc8cff" font-size="10" font-family="monospace">Requires verification</text>
+  <rect x="200" y="406" width="140" height="26" rx="6" fill="#161b22" stroke="#bc8cff" stroke-width="0.5" stroke-opacity="0.4"/>
+  <text x="270" y="423" text-anchor="middle" fill="#bc8cff" font-size="10" font-family="monospace">Trading: Sec 475 MTM</text>
+  <rect x="350" y="406" width="120" height="26" rx="6" fill="#161b22" stroke="#bc8cff" stroke-width="0.5" stroke-opacity="0.4"/>
+  <text x="410" y="423" text-anchor="middle" fill="#bc8cff" font-size="10" font-family="monospace">W-2 ~$170k</text>
+  <rect x="480" y="406" width="120" height="26" rx="6" fill="#161b22" stroke="#bc8cff" stroke-width="0.5" stroke-opacity="0.4"/>
+  <text x="540" y="423" text-anchor="middle" fill="#bc8cff" font-size="10" font-family="monospace">MesloLGS NF font</text>
+
+  <!-- Promotion arrows -->
+  <path d="M 150 275 L 150 295 L 260 295 L 260 310" fill="none" stroke="#bc8cff" stroke-width="1" stroke-dasharray="4,3" opacity="0.5"/>
+  <path d="M 400 275 L 400 310" fill="none" stroke="#bc8cff" stroke-width="1" stroke-dasharray="4,3" opacity="0.5"/>
+  <path d="M 650 275 L 650 295 L 540 295 L 540 310" fill="none" stroke="#bc8cff" stroke-width="1" stroke-dasharray="4,3" opacity="0.5"/>
+  <text x="400" y="300" text-anchor="middle" fill="#bc8cff" font-size="10" font-family="sans-serif" opacity="0.6">promote universal facts ↓</text>
+
+  <!-- Legend -->
+  <rect x="40" y="485" width="12" height="12" rx="2" fill="url(#subGrad)" stroke="#238636" stroke-width="1"/>
+  <text x="58" y="495" fill="#8b949e" font-size="11" font-family="sans-serif">Per-profile sub-tenant (v1)</text>
+  <rect x="220" y="485" width="12" height="12" rx="2" fill="url(#sharedGrad)" stroke="#bc8cff" stroke-width="1" stroke-dasharray="3,2"/>
+  <text x="238" y="495" fill="#8b949e" font-size="11" font-family="sans-serif">Shared sub-tenant (future)</text>
+</svg>
+<div class="diagram-label">One tenant shared by all profiles. Per-profile isolation via sub_tenant_id. Universal facts promoted to "shared" sub-tenant when taxonomy is understood.</div>
+</div>
+
+<!-- ============================== -->
+<!-- 2. FILE LAYOUT                 -->
+<!-- ============================== -->
+<h2 id="files">2. File Layout</h2>
+<pre><code>~/.hermes/hermes-agent/plugins/memory/hydradb/
+├── __init__.py          # HydraDBMemoryProvider class + register(ctx)
+├── plugin.yaml          # Manifest: name, version, pip_dependencies, requires_env, hooks
+└── README.md            # Setup instructions, config reference, tool descriptions</code></pre>
+
+<h4>plugin.yaml</h4>
+<pre><code>name: hydradb
+version: 0.1.0
+description: "HydraDB-backed persistent memory — graph-enriched recall and personalized context via the HydraDB v2 API."
+pip_dependencies:
+  - hydradb-sdk&gt;=2,&lt;3
+requires_env:
+  - HYDRA_DB_API_KEY
+hooks:
+  - on_session_end
+  - on_memory_write</code></pre>
+
+<h4>Config locations</h4>
+<table>
+  <tr><th>Location</th><th>Contents</th><th>Scope</th></tr>
+  <tr><td><code>config.yaml</code></td><td><code>memory.provider: "hydradb"</code></td><td>Activation</td></tr>
+  <tr><td><code>~/.hermes/.env</code></td><td><code>HYDRA_DB_API_KEY=***</code></td><td>Secret</td></tr>
+  <tr><td><code>~/.hermes/hydradb.json</code></td><td><code>{"tenant_id": "...", "sub_tenant_id": "...", "query_mode": "thinking"}</code></td><td>Non-secret config</td></tr>
+</table>
+
+<!-- ============================== -->
+<!-- 3. COMPONENT ARCHITECTURE      -->
+<!-- ============================== -->
+<h2 id="components">3. Component Architecture</h2>
+
+<div class="diagram">
+<svg viewBox="0 0 860 640" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="providerGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#58a6ff;stop-opacity:0.08"/>
+      <stop offset="100%" style="stop-color:#58a6ff;stop-opacity:0.02"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Main provider container -->
+  <rect x="10" y="10" width="840" height="620" rx="14" fill="url(#providerGrad)" stroke="#58a6ff" stroke-width="2"/>
+  <text x="420" y="38" text-anchor="middle" fill="#58a6ff" font-size="16" font-weight="700" font-family="sans-serif">HydraDBMemoryProvider(MemoryProvider)</text>
+
+  <!-- Config layer -->
+  <rect x="25" y="55" width="250" height="130" rx="10" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+  <text x="150" y="76" text-anchor="middle" fill="#d29922" font-size="13" font-weight="600" font-family="sans-serif">Config Layer</text>
+  <rect x="35" y="85" width="230" height="24" rx="5" fill="#0a0e14" stroke="#30363d" stroke-width="0.5"/>
+  <text x="45" y="101" fill="#c9d1d9" font-size="11" font-family="monospace">_load_config()</text>
+  <rect x="35" y="115" width="230" height="24" rx="5" fill="#0a0e14" stroke="#30363d" stroke-width="0.5"/>
+  <text x="45" y="131" fill="#c9d1d9" font-size="11" font-family="monospace">get_config_schema()</text>
+  <rect x="35" y="145" width="230" height="24" rx="5" fill="#0a0e14" stroke="#30363d" stroke-width="0.5"/>
+  <text x="45" y="161" fill="#c9d1d9" font-size="11" font-family="monospace">save_config(values, hermes_home)</text>
+
+  <!-- Client layer -->
+  <rect x="290" y="55" width="250" height="130" rx="10" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+  <text x="415" y="76" text-anchor="middle" fill="#39d2c0" font-size="13" font-weight="600" font-family="sans-serif">Client Layer</text>
+  <rect x="300" y="85" width="230" height="24" rx="5" fill="#0a0e14" stroke="#30363d" stroke-width="0.5"/>
+  <text x="310" y="101" fill="#c9d1d9" font-size="11" font-family="monospace">_get_client()  [lazy, locked]</text>
+  <rect x="300" y="115" width="230" height="24" rx="5" fill="#0a0e14" stroke="#30363d" stroke-width="0.5"/>
+  <text x="310" y="131" fill="#c9d1d9" font-size="11" font-family="monospace">_ensure_tenant()  [auto-provision]</text>
+  <rect x="300" y="145" width="230" height="24" rx="5" fill="#0a0e14" stroke="#f85149" stroke-width="0.5" stroke-opacity="0.5"/>
+  <text x="310" y="161" fill="#f85149" font-size="11" font-family="monospace">Circuit breaker (5 fail / 120s)</text>
+
+  <!-- Lifecycle -->
+  <rect x="555" y="55" width="280" height="130" rx="10" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+  <text x="695" y="76" text-anchor="middle" fill="#3fb950" font-size="13" font-weight="600" font-family="sans-serif">Lifecycle (ABC required)</text>
+  <rect x="565" y="85" width="260" height="24" rx="5" fill="#0a0e14" stroke="#30363d" stroke-width="0.5"/>
+  <text x="575" y="101" fill="#c9d1d9" font-size="11" font-family="monospace">name → "hydradb"</text>
+  <rect x="565" y="115" width="260" height="24" rx="5" fill="#0a0e14" stroke="#30363d" stroke-width="0.5"/>
+  <text x="575" y="131" fill="#c9d1d9" font-size="11" font-family="monospace">is_available()  [no network]</text>
+  <rect x="565" y="145" width="260" height="24" rx="5" fill="#0a0e14" stroke="#30363d" stroke-width="0.5"/>
+  <text x="575" y="161" fill="#c9d1d9" font-size="11" font-family="monospace">initialize(sid, **kw)  [ensure tenant]</text>
+
+  <!-- Read path -->
+  <rect x="25" y="200" width="280" height="140" rx="10" fill="#161b22" stroke="#58a6ff" stroke-width="1" stroke-opacity="0.4"/>
+  <text x="165" y="222" text-anchor="middle" fill="#58a6ff" font-size="13" font-weight="600" font-family="sans-serif">Read Path</text>
+  <rect x="35" y="232" width="260" height="24" rx="5" fill="#0a0e14" stroke="#30363d" stroke-width="0.5"/>
+  <text x="45" y="248" fill="#c9d1d9" font-size="11" font-family="monospace">system_prompt_block()  [static]</text>
+  <rect x="35" y="262" width="260" height="24" rx="5" fill="#0a0e14" stroke="#30363d" stroke-width="0.5"/>
+  <text x="45" y="278" fill="#c9d1d9" font-size="11" font-family="monospace">prefetch(query)  [returns cached]</text>
+  <rect x="35" y="292" width="260" height="24" rx="5" fill="#0a0e14" stroke="#30363d" stroke-width="0.5"/>
+  <text x="45" y="308" fill="#c9d1d9" font-size="11" font-family="monospace">queue_prefetch(query)  [bg query]</text>
+
+  <!-- Write path -->
+  <rect x="320" y="200" width="280" height="140" rx="10" fill="#161b22" stroke="#d29922" stroke-width="1" stroke-opacity="0.4"/>
+  <text x="460" y="222" text-anchor="middle" fill="#d29922" font-size="13" font-weight="600" font-family="sans-serif">Write Path</text>
+  <rect x="330" y="232" width="260" height="24" rx="5" fill="#0a0e14" stroke="#30363d" stroke-width="0.5"/>
+  <text x="340" y="248" fill="#c9d1d9" font-size="11" font-family="monospace">sync_turn(u, a, sid, msgs)</text>
+  <rect x="330" y="262" width="260" height="24" rx="5" fill="#0a0e14" stroke="#30363d" stroke-width="0.5"/>
+  <text x="340" y="278" fill="#c9d1d9" font-size="11" font-family="monospace">  → ingest(infer=True)</text>
+  <rect x="330" y="292" width="260" height="24" rx="5" fill="#0a0e14" stroke="#30363d" stroke-width="0.5"/>
+  <text x="340" y="308" fill="#c9d1d9" font-size="11" font-family="monospace">on_memory_write(action, target, content)</text>
+
+  <!-- Tools -->
+  <rect x="615" y="200" width="220" height="140" rx="10" fill="#161b22" stroke="#bc8cff" stroke-width="1" stroke-opacity="0.4"/>
+  <text x="725" y="222" text-anchor="middle" fill="#bc8cff" font-size="13" font-weight="600" font-family="sans-serif">Tools</text>
+  <rect x="625" y="232" width="200" height="24" rx="5" fill="#0a0e14" stroke="#30363d" stroke-width="0.5"/>
+  <text x="635" y="248" fill="#c9d1d9" font-size="11" font-family="monospace">hydradb_search</text>
+  <rect x="625" y="262" width="200" height="24" rx="5" fill="#0a0e14" stroke="#30363d" stroke-width="0.5"/>
+  <text x="635" y="278" fill="#c9d1d9" font-size="11" font-family="monospace">hydradb_profile</text>
+  <rect x="625" y="292" width="200" height="24" rx="5" fill="#0a0e14" stroke="#30363d" stroke-width="0.5"/>
+  <text x="635" y="308" fill="#c9d1d9" font-size="11" font-family="monospace">hydradb_conclude</text>
+
+  <!-- Session hooks -->
+  <rect x="25" y="355" width="400" height="100" rx="10" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+  <text x="225" y="376" text-anchor="middle" fill="#8b949e" font-size="13" font-weight="600" font-family="sans-serif">Session Hooks</text>
+  <rect x="35" y="386" width="180" height="24" rx="5" fill="#0a0e14" stroke="#30363d" stroke-width="0.5"/>
+  <text x="45" y="402" fill="#c9d1d9" font-size="11" font-family="monospace">on_session_end(messages)</text>
+  <rect x="225" y="386" width="190" height="24" rx="5" fill="#0a0e14" stroke="#30363d" stroke-width="0.5"/>
+  <text x="235" y="402" fill="#c9d1d9" font-size="11" font-family="monospace">shutdown()  [drain threads]</text>
+  <rect x="35" y="418" width="380" height="24" rx="5" fill="#0a0e14" stroke="#30363d" stroke-width="0.5"/>
+  <text x="45" y="434" fill="#c9d1d9" font-size="11" font-family="monospace">on_session_switch / on_pre_compress / on_turn_start / on_delegation</text>
+
+  <!-- HydraDB Cloud -->
+  <rect x="445" y="355" width="390" height="100" rx="10" fill="#161b22" stroke="#39d2c0" stroke-width="1.5" stroke-opacity="0.4"/>
+  <text x="640" y="376" text-anchor="middle" fill="#39d2c0" font-size="13" font-weight="600" font-family="sans-serif">HydraDB Cloud (api.hydradb.com)</text>
+  <rect x="460" y="386" width="170" height="24" rx="5" fill="#0a0e14" stroke="#30363d" stroke-width="0.5"/>
+  <text x="470" y="402" fill="#c9d1d9" font-size="11" font-family="monospace">client.query()  [POST /query]</text>
+  <rect x="640" y="386" width="180" height="24" rx="5" fill="#0a0e14" stroke="#30363d" stroke-width="0.5"/>
+  <text x="650" y="402" fill="#c9d1d9" font-size="11" font-family="monospace">client.context.ingest()  [POST]</text>
+  <rect x="460" y="418" width="170" height="24" rx="5" fill="#0a0e14" stroke="#30363d" stroke-width="0.5"/>
+  <text x="470" y="434" fill="#c9d1d9" font-size="11" font-family="monospace">client.context.delete()  [DEL]</text>
+  <rect x="640" y="418" width="180" height="24" rx="5" fill="#0a0e14" stroke="#30363d" stroke-width="0.5"/>
+  <text x="650" y="434" fill="#c9d1d9" font-size="11" font-family="monospace">client.tenants.*  [CRUD]</text>
+
+  <!-- register entry point -->
+  <rect x="25" y="475" width="810" height="40" rx="8" fill="#0a0e14" stroke="#58a6ff" stroke-width="1" stroke-opacity="0.3"/>
+  <text x="430" y="499" text-anchor="middle" fill="#58a6ff" font-size="12" font-family="monospace">def register(ctx): ctx.register_memory_provider(HydraDBMemoryProvider())</text>
+
+  <!-- Data flow arrows -->
+  <path d="M 165 340 L 165 355" fill="none" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arrowBlue)"/>
+  <path d="M 460 340 L 460 355" fill="none" stroke="#d29922" stroke-width="1.5" marker-end="url(#arrowOrange)"/>
+  <path d="M 725 340 L 640 355" fill="none" stroke="#bc8cff" stroke-width="1.5" marker-end="url(#arrowPurple)"/>
+
+  <!-- Threading note -->
+  <rect x="25" y="530" width="810" height="75" rx="8" fill="rgba(210,153,34,0.06)" stroke="#d29922" stroke-width="0.5" stroke-opacity="0.3"/>
+  <text x="40" y="552" fill="#d29922" font-size="12" font-weight="600" font-family="sans-serif">Threading Model</text>
+  <text x="40" y="572" fill="#8b949e" font-size="11" font-family="sans-serif">All methods synchronous (no asyncio). Non-blocking writes via threading.Thread(daemon=True).</text>
+  <text x="40" y="590" fill="#8b949e" font-size="11" font-family="sans-serif">Reads: queue_prefetch runs query on daemon thread → stashes result → prefetch returns cached (3s join timeout).</text>
+
+  <!-- Arrow markers -->
+  <defs>
+    <marker id="arrowBlue" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 Z" fill="#58a6ff"/>
+    </marker>
+    <marker id="arrowOrange" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 Z" fill="#d29922"/>
+    </marker>
+    <marker id="arrowPurple" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 Z" fill="#bc8cff"/>
+    </marker>
+  </defs>
+</svg>
+<div class="diagram-label">Provider class architecture — config, client, lifecycle, read/write paths, tools, hooks, and the HydraDB cloud backend.</div>
+</div>
+
+<!-- ============================== -->
+<!-- 4. METHOD SPECIFICATION        -->
+<!-- ============================== -->
+<h2 id="methods">4. Method-by-Method Specification</h2>
+
+<h3>4.1 Config</h3>
+<p><code>_load_config()</code> reads <code>HYDRA_DB_API_KEY</code> from env, then merges overrides from <code>$HERMES_HOME/hydradb.json</code>:</p>
+<pre><code>{
+    "api_key": os.environ.get("HYDRA_DB_API_KEY", ""),
+    "tenant_id": "hermes",           # one per deployment
+    "sub_tenant_id": None,           # None → auto-set to agent_identity (profile name)
+    "query_mode": "thinking",        # "fast" or "thinking"
+    "query_by": "hybrid",            # "hybrid" or "text"
+    "max_results": 10,               # prefetch top_k
+}</code></pre>
+
+<div class="callout callout-info">
+  <p><strong>sub_tenant_id default is None.</strong> In <code>initialize()</code>, if empty, it's set to <code>agent_identity</code> — the active profile name. This gives per-profile isolation with zero config. To override (e.g. point a profile at "shared"), set it in <code>hydradb.json</code>.</p>
+</div>
+
+<h3>4.2 Lifecycle</h3>
+<p><code>initialize()</code> resolves <code>sub_tenant_id</code> (config value → profile name → "default"), then calls <code>_ensure_tenant()</code> to auto-provision the shared tenant on first run:</p>
+<pre><code>def initialize(self, session_id, **kwargs):
+    self._config = _load_config()
+    self._api_key = self._config["api_key"]
+    self._tenant_id = self._config["tenant_id"]
+    self._agent_identity = kwargs.get("agent_identity", "")
+    # Resolve sub_tenant_id: explicit config > profile name (agent_identity)
+    self._sub_tenant_id = self._config.get("sub_tenant_id") or self._agent_identity or "default"
+    self._query_mode = self._config["query_mode"]
+    self._query_by = self._config["query_by"]
+    self._max_results = self._config["max_results"]
+    self._hermes_home = kwargs.get("hermes_home", "")
+    self._agent_context = kwargs.get("agent_context", "primary")
+    self._user_name = kwargs.get("user_name", "User")
+    logger.info("HydraDB provider initialized: tenant=%s sub_tenant=%s (profile=%s)",
+                self._tenant_id, self._sub_tenant_id, self._agent_identity)
+    # Ensure tenant exists and is ready (first-run only; cached after)
+    self._ensure_tenant()</code></pre>
+
+<h3>4.3 Read Path</h3>
+<p><code>prefetch()</code> returns cached result (fast, 3s join timeout). <code>queue_prefetch()</code> runs the actual HydraDB query on a daemon thread:</p>
+<pre><code>def queue_prefetch(self, query, *, session_id=""):
+    if self._is_breaker_open():
+        return
+
+    def _run():
+        try:
+            client = self._get_client()
+            result = client.query(
+                tenant_id=self._tenant_id,
+                sub_tenant_id=self._sub_tenant_id,
+                query=query,
+                type="memory",
+                query_by=self._query_by,
+                mode=self._query_mode,
+                max_results=self._max_results,
+                graph_context=True,
+            )
+            context_str = build_string(result)
+            if context_str and context_str.strip():
+                with self._prefetch_lock:
+                    self._prefetch_result = context_str
+            self._record_success()
+        except Exception as e:
+            self._record_failure()
+            logger.debug("HydraDB prefetch failed: %s", e)
+
+    self._prefetch_thread = threading.Thread(
+        target=_run, daemon=True, name="hydradb-prefetch")
+    self._prefetch_thread.start()</code></pre>
+
+<h3>4.4 Write Path</h3>
+<p><code>sync_turn()</code> — fire-and-forget ingest with <code>infer: true</code>:</p>
+<pre><code>def sync_turn(self, user_content, assistant_content, *, session_id="", messages=None):
+    if self._agent_context != "primary":
+        return
+    if self._is_breaker_open():
+        return
+
+    def _sync():
+        try:
+            client = self._get_client()
+            text = f"User: {user_content}\nAssistant: {assistant_content}"
+            memories = json.dumps([{
+                "text": text,
+                "infer": True,           # HydraDB extracts durable facts
+                "user_name": self._user_name,
+            }])
+            client.context.ingest(
+                type="memory",
+                tenant_id=self._tenant_id,
+                sub_tenant_id=self._sub_tenant_id,
+                memories=memories,
+                upsert="true",       # SDK expects string, not bool
+            )
+            self._record_success()
+        except Exception as e:
+            self._record_failure()
+            logger.warning("HydraDB sync_turn failed: %s", e)
+
+    self._sync_thread = threading.Thread(
+        target=_sync, daemon=True, name="hydradb-sync")
+    self._sync_thread.start()</code></pre>
+
+<p><code>on_memory_write()</code> — mirrors built-in MEMORY.md/USER.md writes with <code>infer: false</code>:</p>
+<pre><code>def on_memory_write(self, action, target, content, metadata=None):
+    if self._agent_context != "primary":
+        return
+    if self._is_breaker_open():
+        return
+
+    def _write():
+        try:
+            client = self._get_client()
+            entry_id = f"hermes_{target}_{hashlib.sha256(content.encode()).hexdigest()[:16]}"
+
+            if action == "remove":
+                client.context.delete(
+                    type="memory", tenant_id=self._tenant_id,
+                    sub_tenant_id=self._sub_tenant_id, ids=[entry_id])
+            else:  # "add" or "replace" (upsert handles both)
+                mem_metadata = json.dumps({"target": target, "source": "builtin_mirror"})
+                memories = json.dumps([{
+                    "id": entry_id,
+                    "text": content,
+                    "infer": False,          # store verbatim
+                    "user_name": self._user_name,
+                    "metadata": mem_metadata,  # JSON string, NOT object
+                }])
+                client.context.ingest(
+                    type="memory", tenant_id=self._tenant_id,
+                    sub_tenant_id=self._sub_tenant_id,
+                    memories=memories, upsert="true")
+            self._record_success()
+        except Exception as e:
+            self._record_failure()
+            logger.debug("HydraDB on_memory_write failed: %s", e)
+
+    threading.Thread(target=_write, daemon=True, name="hydradb-mirror").start()</code></pre>
+
+<div class="callout callout-warn">
+  <p><strong>Gotcha:</strong> for <code>type=memory</code>, each memory item's <code>metadata</code> must be a <strong>JSON-encoded string</strong> (e.g. <code>"{\"target\":\"memory\"}"</code>), NOT an object. Passing an object returns <code>400 INVALID_INPUT</code>.</p>
+</div>
+
+<h3>4.5 Tools</h3>
+<table>
+  <tr><th>Tool</th><th>Description</th><th>HydraDB call</th></tr>
+  <tr><td><code>hydradb_search</code></td><td>Semantic memory search by meaning</td><td><code>client.query(type="memory", query=..., max_results=top_k)</code></td></tr>
+  <tr><td><code>hydradb_profile</code></td><td>Full memory overview</td><td><code>client.query(type="memory", query="user profile...", max_results=50, mode="thinking")</code></td></tr>
+  <tr><td><code>hydradb_conclude</code></td><td>Store a durable fact verbatim</td><td><code>client.context.ingest(type="memory", infer=False, upsert="true")</code></td></tr>
+</table>
+
+<!-- ============================== -->
+<!-- 5. DATA FLOW                   -->
+<!-- ============================== -->
+<h2 id="read-flow">5. Data Flow — Read Path</h2>
+
+<div class="diagram">
+<svg viewBox="0 0 860 400" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrR" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#58a6ff"/>
+    </marker>
+    <marker id="arrG" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#3fb950"/>
+    </marker>
+    <marker id="arrO" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#d29922"/>
+    </marker>
+  </defs>
+
+  <!-- Lane: Hermes Agent -->
+  <rect x="10" y="10" width="280" height="380" rx="10" fill="rgba(88,166,255,0.04)" stroke="#58a6ff" stroke-width="1" stroke-opacity="0.3"/>
+  <text x="150" y="32" text-anchor="middle" fill="#58a6ff" font-size="13" font-weight="600" font-family="sans-serif">Hermes Agent (sync thread)</text>
+
+  <!-- Lane: Provider -->
+  <rect x="310" y="10" width="270" height="380" rx="10" fill="rgba(210,153,34,0.04)" stroke="#d29922" stroke-width="1" stroke-opacity="0.3"/>
+  <text x="445" y="32" text-anchor="middle" fill="#d29922" font-size="13" font-weight="600" font-family="sans-serif">HydraDBMemoryProvider</text>
+
+  <!-- Lane: HydraDB Cloud -->
+  <rect x="600" y="10" width="250" height="380" rx="10" fill="rgba(57,210,192,0.04)" stroke="#39d2c0" stroke-width="1" stroke-opacity="0.3"/>
+  <text x="725" y="32" text-anchor="middle" fill="#39d2c0" font-size="13" font-weight="600" font-family="sans-serif">HydraDB Cloud</text>
+
+  <!-- Step 1: prefetch (fast, cached) -->
+  <rect x="25" y="50" width="250" height="50" rx="8" fill="#161b22" stroke="#30363d"/>
+  <text x="150" y="70" text-anchor="middle" fill="#c9d1d9" font-size="12" font-family="sans-serif">1. prefetch_all(query)</text>
+  <text x="150" y="88" text-anchor="middle" fill="#8b949e" font-size="10" font-family="sans-serif">turn_context.py — before API call</text>
+
+  <path d="M 275 75 L 325 75" fill="none" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arrR)"/>
+
+  <rect x="325" y="50" width="240" height="50" rx="8" fill="#161b22" stroke="#58a6ff" stroke-width="1" stroke-opacity="0.5"/>
+  <text x="445" y="70" text-anchor="middle" fill="#58a6ff" font-size="12" font-family="sans-serif">2. prefetch(query)</text>
+  <text x="445" y="88" text-anchor="middle" fill="#8b949e" font-size="10" font-family="sans-serif">returns CACHED result (3s join)</text>
+
+  <path d="M 565 75 L 275 75" fill="none" stroke="#3fb950" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrG)"/>
+
+  <rect x="25" y="115" width="250" height="35" rx="8" fill="rgba(63,185,80,0.06)" stroke="#3fb950" stroke-width="0.5" stroke-opacity="0.3"/>
+  <text x="150" y="137" text-anchor="middle" fill="#3fb950" font-size="11" font-family="sans-serif">3. &lt;memory-context&gt; injected into turn</text>
+
+  <!-- LLM processes -->
+  <rect x="25" y="165" width="250" height="35" rx="8" fill="#161b22" stroke="#30363d"/>
+  <text x="150" y="187" text-anchor="middle" fill="#c9d1d9" font-size="11" font-family="sans-serif">4. LLM processes turn + tools</text>
+
+  <!-- Step 2: queue_prefetch (background) -->
+  <rect x="25" y="215" width="250" height="40" rx="8" fill="#161b22" stroke="#30363d"/>
+  <text x="150" y="239" text-anchor="middle" fill="#c9d1d9" font-size="12" font-family="sans-serif">5. queue_prefetch_all(next_query)</text>
+
+  <path d="M 275 235 L 325 235" fill="none" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arrR)"/>
+
+  <rect x="325" y="215" width="240" height="40" rx="8" fill="#161b22" stroke="#d29922" stroke-width="1" stroke-opacity="0.5"/>
+  <text x="445" y="232" text-anchor="middle" fill="#d29922" font-size="12" font-family="sans-serif">6. queue_prefetch(query)</text>
+  <text x="445" y="248" text-anchor="middle" fill="#8b949e" font-size="10" font-family="sans-serif">spawns daemon thread ↓</text>
+
+  <!-- Daemon thread -->
+  <rect x="325" y="270" width="240" height="40" rx="8" fill="#0a0e14" stroke="#d29922" stroke-width="0.5" stroke-dasharray="4,2" stroke-opacity="0.5"/>
+  <text x="445" y="287" text-anchor="middle" fill="#d29922" font-size="11" font-family="monospace">thread: hydradb-prefetch</text>
+  <text x="445" y="302" text-anchor="middle" fill="#8b949e" font-size="10" font-family="sans-serif">client.query(type="memory")</text>
+
+  <path d="M 565 290 L 615 290" fill="none" stroke="#d29922" stroke-width="1.5" marker-end="url(#arrO)"/>
+
+  <!-- HydraDB query -->
+  <rect x="615" y="270" width="220" height="40" rx="8" fill="#161b22" stroke="#39d2c0" stroke-width="1" stroke-opacity="0.5"/>
+  <text x="725" y="287" text-anchor="middle" fill="#39d2c0" font-size="11" font-family="sans-serif">POST /query</text>
+  <text x="725" y="302" text-anchor="middle" fill="#8b949e" font-size="10" font-family="sans-serif">type="memory", sub_tenant_id=profile</text>
+
+  <path d="M 615 310 L 565 310" fill="none" stroke="#3fb950" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrG)"/>
+
+  <!-- Stash result -->
+  <rect x="325" y="325" width="240" height="40" rx="8" fill="rgba(63,185,80,0.06)" stroke="#3fb950" stroke-width="0.5" stroke-opacity="0.3"/>
+  <text x="445" y="342" text-anchor="middle" fill="#3fb950" font-size="11" font-family="sans-serif">7. build_string(result)</text>
+  <text x="445" y="357" text-anchor="middle" fill="#3fb950" font-size="11" font-family="sans-serif">→ stashed in _prefetch_result</text>
+
+  <!-- Next turn note -->
+  <rect x="25" y="325" width="250" height="40" rx="8" fill="rgba(188,140,255,0.06)" stroke="#bc8cff" stroke-width="0.5" stroke-opacity="0.3"/>
+  <text x="150" y="342" text-anchor="middle" fill="#bc8cff" font-size="11" font-family="sans-serif">8. Next turn's prefetch()</text>
+  <text x="150" y="357" text-anchor="middle" fill="#bc8cff" font-size="11" font-family="sans-serif">returns this stashed result</text>
+
+  <path d="M 325 345 L 275 345" fill="none" stroke="#bc8cff" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrR)" opacity="0.6"/>
+</svg>
+<div class="diagram-label">Read flow: prefetch returns cached (fast), queue_prefetch queries HydraDB in background, result stashed for next turn. Each profile queries its own sub_tenant_id.</div>
+</div>
+
+<h2 id="write-flow">5. Data Flow — Write Path</h2>
+
+<div class="diagram">
+<svg viewBox="0 0 860 420" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="wArrR" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#58a6ff"/>
+    </marker>
+    <marker id="wArrO" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#d29922"/>
+    </marker>
+    <marker id="wArrG" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#3fb950"/>
+    </marker>
+    <marker id="wArrP" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#bc8cff"/>
+    </marker>
+  </defs>
+
+  <!-- Path A header -->
+  <text x="430" y="25" text-anchor="middle" fill="#d29922" font-size="14" font-weight="700" font-family="sans-serif">Path A: sync_turn (every turn, automatic)</text>
+
+  <!-- Path A flow -->
+  <rect x="140" y="40" width="200" height="35" rx="8" fill="#161b22" stroke="#30363d"/>
+  <text x="240" y="62" text-anchor="middle" fill="#c9d1d9" font-size="11" font-family="sans-serif">Turn completes (user + assistant)</text>
+
+  <path d="M 240 75 L 240 90" fill="none" stroke="#d29922" stroke-width="1.5" marker-end="url(#wArrO)"/>
+
+  <rect x="140" y="95" width="200" height="35" rx="8" fill="#161b22" stroke="#30363d"/>
+  <text x="240" y="117" text-anchor="middle" fill="#c9d1d9" font-size="11" font-family="sans-serif">MemoryManager.sync_all()</text>
+
+  <path d="M 240 130 L 240 145" fill="none" stroke="#d29922" stroke-width="1.5" marker-end="url(#wArrO)"/>
+
+  <rect x="120" y="150" width="240" height="40" rx="8" fill="#0a0e14" stroke="#d29922" stroke-width="0.5" stroke-dasharray="4,2" stroke-opacity="0.5"/>
+  <text x="240" y="167" text-anchor="middle" fill="#d29922" font-size="11" font-family="monospace">thread: hydradb-sync (daemon)</text>
+  <text x="240" y="182" text-anchor="middle" fill="#8b949e" font-size="10" font-family="sans-serif">infer=True (auto-extract facts)</text>
+
+  <path d="M 360 170 L 480 170" fill="none" stroke="#d29922" stroke-width="1.5" marker-end="url(#wArrO)"/>
+
+  <rect x="480" y="150" width="220" height="40" rx="8" fill="#161b22" stroke="#39d2c0" stroke-width="1" stroke-opacity="0.5"/>
+  <text x="590" y="167" text-anchor="middle" fill="#39d2c0" font-size="11" font-family="sans-serif">POST /context/ingest</text>
+  <text x="590" y="182" text-anchor="middle" fill="#8b949e" font-size="10" font-family="sans-serif">type="memory", sub_tenant_id=profile</text>
+
+  <path d="M 590 190 L 590 210" fill="none" stroke="#3fb950" stroke-width="1.5" marker-end="url(#wArrG)"/>
+
+  <rect x="480" y="215" width="220" height="35" rx="8" fill="rgba(63,185,80,0.06)" stroke="#3fb950" stroke-width="0.5" stroke-opacity="0.3"/>
+  <text x="590" y="237" text-anchor="middle" fill="#3fb950" font-size="11" font-family="sans-serif">HydraDB indexes async (seconds)</text>
+
+  <!-- Divider -->
+  <line x1="20" y1="270" x2="840" y2="270" stroke="#30363d" stroke-width="1" stroke-dasharray="8,4"/>
+  <text x="430" y="293" text-anchor="middle" fill="#bc8cff" font-size="14" font-weight="700" font-family="sans-serif">Path B: on_memory_write (when agent uses built-in memory tool)</text>
+
+  <!-- Path B flow -->
+  <rect x="140" y="305" width="200" height="35" rx="8" fill="#161b22" stroke="#30363d"/>
+  <text x="240" y="327" text-anchor="middle" fill="#c9d1d9" font-size="11" font-family="sans-serif">memory tool: add/replace/remove</text>
+
+  <path d="M 240 340 L 240 355" fill="none" stroke="#bc8cff" stroke-width="1.5" marker-end="url(#wArrP)"/>
+
+  <rect x="100" y="360" width="280" height="40" rx="8" fill="#0a0e14" stroke="#bc8cff" stroke-width="0.5" stroke-dasharray="4,2" stroke-opacity="0.5"/>
+  <text x="240" y="377" text-anchor="middle" fill="#bc8cff" font-size="11" font-family="monospace">thread: hydradb-mirror (daemon)</text>
+  <text x="240" y="392" text-anchor="middle" fill="#8b949e" font-size="10" font-family="sans-serif">infer=False, stable id=hash(content), upsert="true"</text>
+
+  <path d="M 380 380 L 480 380" fill="none" stroke="#bc8cff" stroke-width="1.5" marker-end="url(#wArrP)"/>
+
+  <rect x="480" y="360" width="220" height="40" rx="8" fill="#161b22" stroke="#39d2c0" stroke-width="1" stroke-opacity="0.5"/>
+  <text x="590" y="377" text-anchor="middle" fill="#39d2c0" font-size="11" font-family="sans-serif">POST /context/ingest OR DELETE /context</text>
+  <text x="590" y="392" text-anchor="middle" fill="#8b949e" font-size="10" font-family="sans-serif">type="memory", sub_tenant_id=profile</text>
+</svg>
+<div class="diagram-label">Write flow: two paths — sync_turn (auto, infer=true) and on_memory_write (mirror built-in, infer=false). Both fire-and-forget on daemon threads.</div>
+</div>
+
+<h3>Same-turn visibility caveat</h3>
+<p>A fact written this turn may not be retrievable via <code>query</code> until HydraDB finishes indexing (seconds for memories). This is acceptable for cross-session memory. If same-turn visibility becomes important, add an in-memory write-through cache (v2 enhancement).</p>
+
+<!-- ============================== -->
+<!-- EVOLUTION                      -->
+<!-- ============================== -->
+<h2 id="evolution">5.4 Evolution: Promoting Shared Concepts</h2>
+
+<div class="diagram">
+<svg viewBox="0 0 800 280" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="eArr" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#bc8cff"/>
+    </marker>
+  </defs>
+
+  <!-- Phase 1 -->
+  <rect x="20" y="20" width="340" height="110" rx="12" fill="rgba(63,185,80,0.06)" stroke="#3fb950" stroke-width="1.5"/>
+  <text x="190" y="45" text-anchor="middle" fill="#3fb950" font-size="14" font-weight="700" font-family="sans-serif">Phase 1 (v1): Isolated</text>
+  <text x="190" y="68" text-anchor="middle" fill="#c9d1d9" font-size="12" font-family="sans-serif">Each profile → own sub_tenant_id</text>
+  <text x="190" y="88" text-anchor="middle" fill="#8b949e" font-size="11" font-family="sans-serif">bridgetrader → "bridgetrader"</text>
+  <text x="190" y="105" text-anchor="middle" fill="#8b949e" font-size="11" font-family="sans-serif">dotfiles → "dotfiles"</text>
+  <text x="190" y="122" text-anchor="middle" fill="#8b949e" font-size="11" font-family="sans-serif">journal → "journal"</text>
+
+  <!-- Arrow -->
+  <path d="M 370 75 L 420 75" fill="none" stroke="#bc8cff" stroke-width="2" marker-end="url(#eArr)"/>
+  <text x="395" y="65" text-anchor="middle" fill="#bc8cff" font-size="10" font-family="sans-serif">when</text>
+  <text x="395" y="92" text-anchor="middle" fill="#bc8cff" font-size="10" font-family="sans-serif">taxonomy</text>
+  <text x="395" y="107" text-anchor="middle" fill="#bc8cff" font-size="10" font-family="sans-serif">is clear</text>
+
+  <!-- Phase 2 -->
+  <rect x="430" y="20" width="350" height="110" rx="12" fill="rgba(188,140,255,0.06)" stroke="#bc8cff" stroke-width="1.5"/>
+  <text x="605" y="45" text-anchor="middle" fill="#bc8cff" font-size="14" font-weight="700" font-family="sans-serif">Phase 2 (future): Promoted</text>
+  <text x="605" y="68" text-anchor="middle" fill="#c9d1d9" font-size="12" font-family="sans-serif">Universal facts → "shared" sub_tenant</text>
+  <text x="605" y="88" text-anchor="middle" fill="#8b949e" font-size="11" font-family="sans-serif">Profile-specific facts stay per-profile</text>
+  <text x="605" y="108" text-anchor="middle" fill="#8b949e" font-size="11" font-family="sans-serif">Query reads both: profile + shared</text>
+
+  <!-- Steps -->
+  <rect x="20" y="150" width="760" height="115" rx="10" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+  <text x="40" y="175" fill="#58a6ff" font-size="13" font-weight="600" font-family="sans-serif">Steps to promote:</text>
+  <text x="40" y="197" fill="#c9d1d9" font-size="12" font-family="sans-serif">1. Identify universal facts by reviewing per-profile memories (hydradb_profile tool or client.context.list)</text>
+  <text x="40" y="217" fill="#c9d1d9" font-size="12" font-family="sans-serif">2. Write universal facts to sub_tenant_id="shared" (via hydradb_conclude, CLI command, or migration script)</text>
+  <text x="40" y="237" fill="#c9d1d9" font-size="12" font-family="sans-serif">3. Update queue_prefetch to query both profile sub-tenant AND "shared" (two queries, merged client-side)</text>
+  <text x="40" y="257" fill="#c9d1d9" font-size="12" font-family="sans-serif">4. Tag memories with metadata ({"scope": "profile"} vs {"scope": "shared"}) for deterministic filtering</text>
+</svg>
+<div class="diagram-label">Evolution path: start isolated (v1), promote universal facts to shared sub-tenant when taxonomy is understood. No schema changes needed — sub-tenants are implicit in HydraDB.</div>
+</div>
+
+<!-- ============================== -->
+<!-- 6. CIRCUIT BREAKER             -->
+<!-- ============================== -->
+<h2 id="breaker">6. Circuit Breaker</h2>
+<div class="card">
+<pre><code>_BREAKER_THRESHOLD = 5       # consecutive failures before tripping
+_BREAKER_COOLDOWN_SECS = 120  # pause duration after tripping</code></pre>
+<ul>
+  <li><code>_is_breaker_open()</code>: returns True if failures >= threshold AND cooldown hasn't expired. Resets counter after cooldown.</li>
+  <li><code>_record_success()</code>: resets consecutive_failures to 0.</li>
+  <li><code>_record_failure()</code>: increments counter; if threshold reached, sets <code>breaker_open_until = time.monotonic() + cooldown</code> and logs a warning.</li>
+  <li>All network calls check <code>_is_breaker_open()</code> first and short-circuit if open.</li>
+</ul>
+</div>
+
+<!-- ============================== -->
+<!-- 7. TENANT PROVISIONING         -->
+<!-- ============================== -->
+<h2 id="tenant">7. Tenant Auto-Provisioning</h2>
+<p><code>_ensure_tenant()</code> runs in <code>initialize()</code> (once per agent startup):</p>
+<ol>
+  <li>List existing tenants: <code>client.tenants.list()</code></li>
+  <li>If <code>tenant_id</code> not in the list: <code>client.tenants.create(tenant_id=...)</code></li>
+  <li>Poll <code>client.tenants.status(tenant_id=...)</code> until <code>data.infra.ready_for_ingestion</code> is True (every 5s, max 60 attempts = 5min)</li>
+  <li>On failure: log warning, proceed anyway (circuit breaker will trip if API is down)</li>
+</ol>
+
+<!-- ============================== -->
+<!-- 8. SDK REFERENCE               -->
+<!-- ============================== -->
+<h2 id="sdk">8. SDK Method Reference (Verified)</h2>
+<p>All signatures confirmed against <code>hydradb-sdk==2.0.1</code>. All parameters are keyword-only.</p>
+
+<h4>Constructor</h4>
+<pre><code>HydraDB(token=str, base_url=None, timeout=None, ...)</code></pre>
+
+<h4>Query (read path)</h4>
+<pre><code>client.query(
+    *, tenant_id, query, sub_tenant_id=None, type="knowledge",
+    query_by="hybrid", mode="fast", max_results=None,
+    alpha=0.8, recency_bias=0.0, graph_context=True,
+    query_forceful_relations=True, query_apps=False,
+    metadata_filters=None, additional_context=None, operator="or",
+) -> HandlerEnvelopeSearchV2RetrievalResult</code></pre>
+<p><code>result.data.chunks</code> → list of <code>SearchV2Chunk</code> with: <code>chunk_content</code>, <code>id</code>, <code>relevancy_score</code>, <code>metadata</code>, <code>source_type</code>, <code>source_title</code></p>
+<p><code>from hydra_db.helpers import build_string</code> → <code>build_string(result)</code> → str</p>
+
+<h4>Context.ingest (write path)</h4>
+<pre><code>client.context.ingest(
+    *, tenant_id, type, memories=None, sub_tenant_id=None,
+    upsert=None, documents=None, document_metadata=None, app_knowledge=None,
+) -> HandlerEnvelopeIngestionV2SourceUploadResponse</code></pre>
+<p><code>memories</code> = JSON-stringified array of <code>{id?, text, infer?, user_name?, metadata?}</code></p>
+<p><code>metadata</code> for each memory must be a <strong>JSON string</strong>, not an object. <code>upsert</code> is <code>Optional[str]</code> — pass <code>"true"</code>.</p>
+
+<h4>Context.delete</h4>
+<pre><code>client.context.delete(*, tenant_id, ids, sub_tenant_id=None, type="knowledge")</code></pre>
+
+<h4>Tenants</h4>
+<pre><code>client.tenants.create(*, tenant_id=None, tenant_metadata_schema=None, ...)
+client.tenants.list()    → .data.tenant_ids: Optional[List[str]]
+client.tenants.status(*) → .data.infra.ready_for_ingestion: bool
+client.tenants.sub_tenants(*, tenant_id)
+client.tenants.delete(*, tenant_id)</code></pre>
+
+<!-- ============================== -->
+<!-- 9. TESTING                     -->
+<!-- ============================== -->
+<h2 id="testing">9. Testing Strategy</h2>
+<p>Test file: <code>tests/plugins/memory/test_hydradb_provider.py</code> — fake client, monkeypatch <code>_get_client</code>.</p>
+
+<table>
+  <tr><th>Test class</th><th>Key tests</th></tr>
+  <tr>
+    <td><code>TestHydraDBConfig</code></td>
+    <td>is_available with/without key, is_available no SDK, config defaults, config overrides, save_config writes json</td>
+  </tr>
+  <tr>
+    <td><code>TestHydraDBQueries</code></td>
+    <td>prefetch returns cached, prefetch empty, queue_prefetch params, search/profile/conclude tools, metadata is JSON string</td>
+  </tr>
+  <tr>
+    <td><code>TestHydraDBWrites</code></td>
+    <td>sync_turn infer=true, sync_turn skips non-primary, on_memory_write add/replace/remove, skips non-primary</td>
+  </tr>
+  <tr>
+    <td><code>TestHydraDBCircuitBreaker</code></td>
+    <td>opens after threshold, blocks calls, resets on success</td>
+  </tr>
+  <tr>
+    <td><code>TestHydraDBShutdown</code></td>
+    <td>joins threads, clears client</td>
+  </tr>
+</table>
+
+<!-- ============================== -->
+<!-- 10. OPEN QUESTIONS             -->
+<!-- ============================== -->
+<h2 id="questions">10. Open Questions</h2>
+
+<div class="callout callout-info">
+  <p><span class="badge badge-green">RESOLVED</span> <strong>Tenant listing response shape:</strong> <code>client.tenants.list().data.tenant_ids</code> is <code>Optional[List[str]]</code>. Confirmed from installed SDK.</p>
+</div>
+<div class="callout callout-info">
+  <p><span class="badge badge-green">RESOLVED</span> <strong>upsert parameter type:</strong> <code>Optional[str]</code> — pass <code>"true"</code> / <code>"false"</code> as a string, not <code>True</code> / <code>False</code>.</p>
+</div>
+<div class="card">
+  <p><span class="badge badge-orange">REVISITED</span> <strong>build_string output format:</strong> Real testing shows 72-89% framing overhead (headers, IDs, scores). NOT clean prose. Must format chunks manually from <code>result.data.chunks</code> using <code>chunk_content</code> + <code>relevancy_score</code>. Use <code>_format_chunks()</code> helper.</p>
+  <p><span class="badge badge-green">RESOLVED</span> <strong>Memory indexing latency:</strong> Ingest ~500ms, query ~2-2.5s, queryable in 1-5s. Status endpoint has race (FILE_NOT_FOUND for first 1-2s), poll should tolerate. Same-turn visibility cache bridges the gap.</p>
+  <p><span class="badge badge-green">PARTIAL</span> <strong>Rate limits / free tier:</strong> Ship (Free) $0/mo — unlimited API calls/tenants, storage-based pricing. Paid: Surge $25/mo (2GB), Scale $399/mo (10GB). Exact RPM/RPS behind dashboard login. Free tier appears sufficient for personal Hermes (~1 ingest + 1 query/turn). Circuit breaker already handles 429s. Sign up when building, monitor, adjust.</p>
+  <p><span class="badge badge-orange">LOW PRIORITY</span> <strong>Tenant auto-create race:</strong> If two profiles start simultaneously and tenant doesn't exist, both may try to create it. Handle 409 Conflict gracefully (treat as already exists). Low stakes — unlikely in single-user setup with existing tenant.</p>
+</div>
+
+  </main>
+</div>
+
+<script>
+  // Sidebar active link tracking
+  const links = document.querySelectorAll('.sidebar nav a');
+  const sections = [];
+  links.forEach(link => {
+    const id = link.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) sections.push({el, link});
+  });
+
+  window.addEventListener('scroll', () => {
+    let active = null;
+    for (const s of sections) {
+      if (s.el.getBoundingClientRect().top < 120) active = s;
+    }
+    links.forEach(l => l.classList.remove('active'));
+    if (active) active.link.classList.add('active');
+  });
+
+  // Smooth scroll
+  links.forEach(link => {
+    link.addEventListener('click', (e) => {
+      e.preventDefault();
+      const target = document.getElementById(link.getAttribute('href').slice(1));
+      if (target) target.scrollIntoView({behavior: 'smooth', block: 'start'});
+    });
+  });
+</script>
+</body>
+</html>
