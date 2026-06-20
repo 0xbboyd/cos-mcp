@@ -1,8 +1,9 @@
 name: hydradb
-version: 0.1.0
+version: 0.2.0
 description: "HydraDB-backed persistent memory — graph-enriched recall and personalized context via the HydraDB v2 API."
 pip_dependencies:
   - hydradb-sdk>=2,<3
+  - cos-mcp>=0.2.0
 requires_env:
   - HYDRA_DB_API_KEY
 hooks:
