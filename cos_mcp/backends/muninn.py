@@ -148,8 +148,6 @@ class MuninnDBBackend(MemoryBackend):
                 t.lower().replace(" ", "-").replace("_", "-")
                 for t in tags
             ]
-        if "hermes-memory" not in normalized_tags:
-            normalized_tags.append("hermes-memory")
 
         payload: Dict[str, Any] = {
             "vault": self._vault,
@@ -161,6 +159,15 @@ class MuninnDBBackend(MemoryBackend):
 
         if memory_type_label:
             payload["type_label"] = memory_type_label
+
+        # Tag for data segregation: "hermes-context" vs "hermes-memory"
+        default_tag = (
+            "hermes-context"
+            if memory_type_label == "context"
+            else "hermes-memory"
+        )
+        if default_tag not in normalized_tags:
+            normalized_tags.append(default_tag)
 
         self._post("/api/engrams", payload)
 

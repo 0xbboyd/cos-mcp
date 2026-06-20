@@ -88,7 +88,7 @@ class HydraDBBackend(MemoryBackend):
             tenant_id=self._tenant_id,
             sub_tenant_id=self._sub_tenant_id,
             query=query_text,
-            type="memory",
+            type=memory_type if memory_type else "memory",
             query_by=query_by,
             mode=query_mode,
             max_results=max_results,
@@ -120,7 +120,7 @@ class HydraDBBackend(MemoryBackend):
 
         memories = json.dumps([entry])
         client.context.ingest(
-            type="memory",
+            type=memory_type_label if memory_type_label else "memory",
             tenant_id=self._tenant_id,
             sub_tenant_id=self._sub_tenant_id,
             memories=memories,
