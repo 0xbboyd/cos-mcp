@@ -8,6 +8,17 @@ Two Hermes Agent memory provider plugins:
 
 2. **MuninnDB Memory Provider** — local cognitive memory using MuninnDB's neuroscience-inspired engine. ACT-R temporal scoring (frequent access strengthens recall; stale memories fade), Hebbian co-activation learning (memories used together auto-associate), Bayesian confidence tracking (contradicted memories are discounted), and 16 typed relationship types — all engine-native. One Muninn vault per profile for isolation.
 
+## Current Milestone: v1.1 Context Engine Plugins
+
+**Goal:** Two Hermes Agent context engine plugins (HydraDB + MuninnDB) that implement the ContextEngine ABC — replacing the built-in lossy ContextCompressor with graph/cognitive-backed context management. Same quality bar as v1.0 memory providers (full implementation + tests + in-tree deploy).
+
+**Target features:**
+- HydraDB Context Engine — graph-backed compress() pathway, context_search/context_expand tools, session lifecycle, circuit breaker
+- MuninnDB Context Engine — cognitive-backed compress() with ACT-R decay + Hebbian learning, context_search/context_expand tools, local sync execution
+- Shared cos_mcp infra — BaseContextEngine, circuit breaker, config loading, formatting
+- Test suites — fake backends for both engines, 100% requirement coverage
+- In-tree deployment — `plugins/context_engine/hydradb-context/` and `plugins/context_engine/muninn-context/`
+
 ## Core Value
 
 Persistent searchable memory that survives across Hermes sessions and profiles — replacing ephemeral per-session context with durable, retrievable knowledge. Two backends serving the same contract — swap by changing one config value.
@@ -108,4 +119,4 @@ This document evolves at phase transitions and milestone boundaries.
 
 ---
 
-*Last updated: 2026-06-20 — documentation pass*
+*Last updated: 2026-06-20 — v1.1 milestone started*

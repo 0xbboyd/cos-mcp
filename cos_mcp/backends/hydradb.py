@@ -74,6 +74,7 @@ class HydraDBBackend(MemoryBackend):
         graph_context: bool = True,
         memory_type: Optional[str] = None,
         min_confidence: Optional[float] = None,
+        context_id: Optional[str] = None,
     ) -> Any:
         """Run a hybrid search against HydraDB.
 
@@ -84,16 +85,19 @@ class HydraDBBackend(MemoryBackend):
         # memory_type and min_confidence are not natively supported
         # by HydraDB v2 API — they're accepted for interface compatibility
         # but ignored. Use metadata filters for type filtering instead.
-        return client.query(
-            tenant_id=self._tenant_id,
-            sub_tenant_id=self._sub_tenant_id,
-            query=query_text,
-            type=memory_type if memory_type else "memory",
-            query_by=query_by,
-            mode=query_mode,
-            max_results=max_results,
-            graph_context=graph_context,
-        )
+        kwargs: Dict[str, Any] = {
+            "tenant_id": self._tenant_id,
+            "sub_tenant_id": self._sub_tenant_id,
+            "query": query_text,
+            "type": memory_type if memory_type else "memory",
+            "query_by": query_by,
+            "mode": query_mode,
+            "max_results": max_results,
+            "graph_context": graph_context,
+        }
+        if context_id:
+            kwargs["context_id"] = context_id
+        return client.query(**kwargs)
 
     def ingest(
         self,
