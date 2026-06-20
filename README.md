@@ -1,45 +1,64 @@
 # cos-mcp
 
-HydraDB Memory Provider for Hermes Agent — a cloud-backed persistent memory plugin that replaces Hermes' ephemeral file-based memory with graph-enriched semantic retrieval, shared across all profiles.
+Memory provider plugins for Hermes Agent — persistent, cross-session memory with cognitive retrieval.
 
-## What It Does
+Two providers:
 
-- **Persistent cross-session memory** — conversations and facts survive restarts
-- **Semantic + graph retrieval** — HydraDB's hybrid search (BM25 + vectors + knowledge graph)
-- **Auto-fact-extraction** — `infer=true` extracts durable facts from conversations
-- **Three agent tools** — `hydradb_search`, `hydradb_profile`, `hydradb_conclude`
-- **Per-profile isolation** — one HydraDB tenant, sub-tenants scoped to each Hermes profile
-- **Resilience** — independent read/write circuit breakers, fire-and-forget daemon threads
+| Provider | Backend | Cognitive Features | Deployment |
+|---|---|---|---|
+| **hydradb** | HydraDB Cloud (managed graph DB) | Hybrid search (BM25 + vectors + knowledge graph), `infer` auto-extraction | Cloud API, zero ops |
+| **muninn** | MuninnDB (local cognitive DB) | ACT-R temporal scoring, Hebbian learning, Bayesian confidence, 16 typed relationships, PAS — all engine-native | Local binary, single command |
+
+## Quick Start
+
+### HydraDB (Cloud)
+
+```bash
+# Copy plugin in-tree
+cp -r hydradb-memory/ ~/.hermes/hermes-agent/plugins/memory/hydradb/
+
+# Set API key
+echo 'HYDRA_DB_API_KEY=sk_live_...' >> ~/.hermes/.env
+
+# Activate
+hermes memory setup hydradb
+```
+
+### MuninnDB (Local)
+
+```bash
+# Install and start MuninnDB
+curl -sSL https://muninndb.com/install.sh | sh
+muninn start
+
+# Copy plugin in-tree
+cp -r muninn-memory/ ~/.hermes/hermes-agent/plugins/memory/muninn/
+
+# Activate (no API key needed for default vault)
+hermes memory setup muninn
+```
 
 ## Files
 
 ```
-hydradb-memory/          # Provider plugin (735-line Python class)
+hydradb-memory/          # HydraDB provider (735 lines)
   __init__.py            # HydraDBMemoryProvider(MemoryProvider)
-  plugin.yaml            # Manifest: name, deps, hooks
-  README.md              # Setup instructions
+  plugin.yaml            # Manifest: hydradb-sdk>=2,<3
+
+muninn-memory/           # MuninnDB provider (760 lines)
+  __init__.py            # MuninnDBMemoryProvider(MemoryProvider)
+  plugin.yaml            # Manifest: requests>=2.31
 
 research/                # Architecture docs & API reference
   hydradb-provider-design.{md,html}
   hydradb-v2-research.md
   hermes-memory-provider-research.md
-
-tests/                   # 65-unit test suite (fake client, zero live API calls)
-  plugins/memory/test_hydradb_provider.py
-  plugins/memory/conftest.py
 ```
 
-## Quick Start
+## Choosing a Provider
 
-```bash
-# Provider is deployed in-tree:
-ls ~/.hermes/hermes-agent/plugins/memory/hydradb/
+**Use HydraDB if you want:** zero local infrastructure, cloud-managed graph search, free tier ($0/mo with unlimited API calls).
 
-# Activate:
-hermes memory setup hydradb
+**Use MuninnDB if you want:** cognitive primitives in the storage engine (temporal decay based on actual access patterns, auto-association through co-activation, confidence tracking, contradiction detection), offline capability, no API dependency.
 
-# Verify:
-hermes doctor
-```
-
-Requires `HYDRA_DB_API_KEY` in `~/.hermes/.env` and `hydradb-sdk>=2,<3` (installed automatically by `hermes memory setup`).
+Both implement the same `MemoryProvider` ABC — swap by changing `memory.provider` in `~/.hermes/config.yaml`.

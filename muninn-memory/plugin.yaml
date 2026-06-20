@@ -1,0 +1,10 @@
+name: muninn
+version: 0.1.0
+description: "MuninnDB-backed cognitive memory — ACT-R temporal scoring, Hebbian learning, Bayesian confidence, and 16 typed relationship types, engine-native."
+pip_dependencies:
+  - requests>=2.31
+requires_env:
+  - MUNINN_API_KEY
+hooks:
+  - on_session_end
+  - on_memory_write

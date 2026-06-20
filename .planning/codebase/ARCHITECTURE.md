@@ -1,218 +1,153 @@
 # Architecture
 
 **Analysis Date:** 2026-06-20
+**Updated:** 2026-06-20 — documentation pass (dual providers, dual circuit breaker)
 
 ## Pattern Overview
 
-**Overall:** Plugin / Provider pattern — single-class monolith implementing the Hermes `MemoryProvider` ABC.
+**Overall:** Plugin / Provider pattern — two single-class implementations of the Hermes `MemoryProvider` ABC, each backed by a different memory engine.
 
-**Key Characteristics:**
-- Single Python class `HydraDBMemoryProvider(MemoryProvider)` with all logic in one file
-- Synchronous API backed by background daemon threads for non-blocking I/O
+**HydraDB Provider** (`HydraDBMemoryProvider`, 735 lines):
+- Cloud-backed via HydraDB v2 API
+- Synchronous SDK client (`hydradb-sdk`)
+- Background daemon threads for non-blocking I/O
 - Lazy, thread-safe client singleton via double-checked locking
-- Circuit breaker for resilience (5 consecutive failures → 120s cooldown)
+- Dual circuit breaker (independent read/write gauges)
 - Fire-and-forget writes; prefetch / cache model for reads
-- Static tool schemas exposed to the model via OpenAI function-calling format
+- Static tool schemas (OpenAI function-calling format)
 
-## Layers
+**MuninnDB Provider** (`MuninnDBMemoryProvider`, 760 lines):
+- Local cognitive engine via MuninnDB REST API
+- Sync HTTP client (`requests.Session`)
+- All cognitive primitives engine-native (ACT-R scoring, Hebbian learning, Bayesian confidence, PAS, typed relationships)
+- Same threading/circuit-breaker/prefetch patterns as HydraDB provider
+- Richer tool schemas (12 memory types, confidence thresholds, concept+content split)
 
-**Config Layer:**
+Both providers share the same architectural patterns — only the backend API differs.
+
+## HydraDB Provider — Layers
+
+### Config Layer
 - Purpose: Read and persist provider configuration
-- Contains: `_load_config()` (env + hydradb.json), `get_config_schema()` (field descriptors for `hermes memory setup`), `save_config()` (write non-secret config to disk)
-- Location: `hydradb-memory/__init__.py` lines 81–185
+- Contains: `_load_config()` (env + hydradb.json), `get_config_schema()` (field descriptors), `save_config()` (write non-secret config)
 - Depends on: `os.environ`, JSON file I/O
-- Used by: Lifecycle layer (initialize), Hermes CLI tooling
+- Used by: Lifecycle layer, Hermes CLI tooling
 
-**Lifecycle Layer:**
-- Purpose: Handle provider registration, availability check, and initialization
-- Contains: `name` (class attr), `is_available()` (checks API key + SDK import), `initialize(session_id, **kwargs)` (captures identity, sets up threading primitives, circuit breaker state)
-- Location: `hydradb-memory/__init__.py` lines 188–237
+### Lifecycle Layer
+- Purpose: Provider registration, availability check, initialization
+- Contains: `name` ("hydradb"), `is_available()` (checks API key + SDK import), `initialize(session_id, **kwargs)` (captures identity, sets up threading, tenant auto-provisioning)
 - Depends on: Config layer, `hydra_db` SDK (optional import)
 - Used by: Hermes Agent runtime at startup
 
-**Client Layer:**
+### Client Layer
 - Purpose: Manage the HydraDB SDK client instance
-- Contains: `_get_client()` — lazy, thread-safe singleton via `threading.Lock` (double-checked locking pattern)
-- Location: `hydradb-memory/__init__.py` lines 241–249
+- Contains: `_get_client()` — lazy, thread-safe singleton via `threading.Lock` (double-checked locking)
 - Depends on: `hydra_db.HydraDB` SDK class, `_api_key` from config
-- Used by: Read path, write path, tools
 
-**Read Path:**
+### Tenant Provisioning
+- Purpose: Auto-create tenant on first run, poll until ready
+- Contains: `_ensure_tenant()` — create if missing (handles 409 conflict), poll `/tenants/status` every 5s up to 5 min
+- Depends on: Client layer, circuit breaker
+- Note: Creates `_tenant_ready` flag to skip subsequent calls
+
+### Read Path
 - Purpose: Retrieve relevant memories before each model turn
-- Contains: `system_prompt_block()` (static text injected into system prompt), `queue_prefetch(query)` (fires background query), `prefetch()` (returns cached result), `_format_chunks(result, min_score)` (extracts clean memory text from SDK response objects)
-- Location: `hydradb-memory/__init__.py` lines 272–337
-- Depends on: Client layer, circuit breaker
-- Used by: Hermes runtime (queue_prefetch before turn, prefetch during prompt assembly)
+- Contains: `system_prompt_block()` (static text), `queue_prefetch(query)` (background query), `prefetch()` (returns cached), `_format_chunks(result, min_score)` (clean prose extraction from SDK response)
+- Depends on: Client layer, circuit breaker (read gauge)
+- Note: `graph_context=True` is requested but query_paths are not surfaced in formatted output
 
-**Write Path:**
+### Write Path
 - Purpose: Persist conversation turns and memory writes into HydraDB
-- Contains: `sync_turn(user_content, assistant_content)` (ingests user+assistant pair, `infer=True`), `on_memory_write(action, target, content, metadata)` (mirrors built-in memory operations, `infer=False`)
-- Location: `hydradb-memory/__init__.py` lines 341–420
-- Depends on: Client layer, circuit breaker
-- Used by: Hermes runtime (sync_turn after each turn), Hermes built-in memory system (on_memory_write)
+- Contains: `sync_turn(user, assistant)` (ingests pair, `infer=True`), `on_memory_write(action, target, content, metadata)` (mirrors built-in ops, `infer=False`, content-hash IDs for deterministic upsert/delete)
+- Depends on: Client layer, circuit breaker (write gauge)
 
-**Tools Layer:**
+### Tools Layer
 - Purpose: Expose memory operations to the model as function-calling tools
-- Contains: `get_tool_schemas()` (returns OpenAI-format schemas for `hydradb_search`, `hydradb_profile`, `hydradb_conclude`), `handle_tool_call(tool_name, args)` (dispatches to `_tool_search`, `_tool_profile`, `_tool_conclude`)
-- Location: `hydradb-memory/__init__.py` lines 31–75 (schemas), 424–495 (handlers)
+- Contains: `get_tool_schemas()` ([SEARCH, PROFILE, CONCLUDE]), `handle_tool_call(name, args)` (dispatches to `_tool_search`, `_tool_profile`, `_tool_conclude`)
 - Depends on: Client layer
-- Used by: Hermes Agent runtime (registers schemas, routes tool calls)
+- Note: `_tool_search` uses `mode="fast"` for lower latency; `_tool_profile` uses `mode="thinking"`
 
-**Session Hooks Layer:**
+### Session Hooks
 - Purpose: Respond to session lifecycle events
-- Contains: `on_session_end(messages)` (ingests last 10 user/assistant messages as episodic memory, `infer=True`), `shutdown()` (joins background threads with 5s timeout, clears client)
-- Location: `hydradb-memory/__init__.py` lines 499–548
-- Depends on: Client layer, circuit breaker, threading primitives from initialize
-- Used by: Hermes runtime (on_session_end at session close, shutdown at provider teardown)
+- Contains: `on_session_end(messages)` (ingests last 10 user/assistant messages as episodic memory), `shutdown()` (joins background threads with 5s timeout, clears client)
+- Depends on: Client layer, circuit breaker, threading primitives
 
-**Circuit Breaker (Cross-Cutting):**
-- Purpose: Prevent cascading failures when HydraDB is unreachable
-- Contains: `_is_breaker_open()` (returns True during cooldown), `_record_success()` (resets failure count), `_record_failure()` (increments count, opens breaker at threshold 5 for 120s)
-- Location: `hydradb-memory/__init__.py` lines 253–268
-- Depends on: `time.time()`
-- Used by: Read path, write path, session hooks
+## MuninnDB Provider — Layers
 
-## Data Flow
+### Config Layer
+- Purpose: Read and persist provider configuration
+- Contains: `_load_config()` (env + muninn.json), `get_config_schema()` (field descriptors), `save_config()`
+- Config keys: `base_url` (default `http://127.0.0.1:8475`), `vault` (default `"default"`), `api_key` (optional for default vault)
+- Depends on: `os.environ`, JSON file I/O
 
-**Memory Retrieval (prefetch cycle):**
+### Lifecycle Layer
+- Purpose: Provider registration, availability check, initialization
+- Contains: `name` ("muninn"), `is_available()` (checks `requests` import), `initialize()` (loads config, creates HTTP session with bearer auth)
+- Simpler than HydraDB — no tenant provisioning (MuninnDB creates vaults on first write)
 
-1. Hermes runtime calls `queue_prefetch(query)` with the current user message
-2. Circuit breaker check (`_is_breaker_open()`) — if open, return immediately
-3. Spawns daemon thread (`hydradb-prefetch`)
-4. Thread calls `_get_client()` (lazy init if first call)
-5. Thread calls `client.query(tenant_id, sub_tenant_id, query, type="memory", query_by, mode, max_results, graph_context=True)`
-6. Thread calls `_format_chunks(result, min_score=0.3)` — extracts `chunk_content` from result chunks, filters by `relevancy_score`, joins with double newlines
-7. Thread stores formatted string in `_prefetch_result` (under lock)
-8. Thread calls `_record_success()` (resets circuit breaker on success) or `_record_failure()` (on exception)
-9. Next turn: Hermes runtime calls `prefetch()` — returns cached result under lock, clears cache
-10. Result injected into system prompt as `## HydraDB Memory\n{content}`
+### HTTP Client Layer
+- Purpose: Sync HTTP client for MuninnDB REST API
+- Contains: `_session` (`requests.Session`), `_post()` (POST helper), `_get()` (GET helper), `_health_check()` (GET /api/health)
+- Uses bearer auth header when `MUNINN_API_KEY` is set
 
-**Memory Storage (turn sync):**
+### Read Path
+- Purpose: Retrieve relevant memories via MuninnDB ACTIVATE pipeline
+- Contains: `system_prompt_block()` (static text describing cognitive features), `queue_prefetch()` (background ACTIVATE via daemon thread), `prefetch()` (returns cached activations), `_activate()` (POST /api/activate), `_format_activations()` (concept headers, confidence warnings, dormant filtering)
+- Key difference: Uses `context` array for semantic search, supports `memory_type` filter and `threshold` at API level
+- Note: All cognitive scoring (ACT-R, Hebbian boosting, PAS injection) happens in MuninnDB engine — no plugin-level formatting logic needed
 
-1. Hermes runtime calls `sync_turn(user_content, assistant_content)` after each turn
-2. Guard: skip if `_agent_context != "primary"` or circuit breaker open
-3. Spawns daemon thread (`hydradb-sync`)
-4. Thread formats memory: `"User: {user}\nAssistant: {assistant}"` with `infer=True` (HydraDB auto-extracts durable facts server-side)
-5. Thread calls `client.context.ingest(type="memory", tenant_id, sub_tenant_id, memories=json_string, upsert="true")`
-6. Fire-and-forget — no result returned to caller
+### Write Path
+- Purpose: Persist memories as engrams in MuninnDB
+- Contains: `sync_turn()` (ingests turn as event engram), `on_memory_write()` (mirrors built-in ops as fact/preference engrams), `_write_engram()` (POST /api/engrams with concept, content, tags, type_label, confidence)
+- Key difference: Uses concept+content split (Muninn's memory model), tags for auto-association, type_label for classification
 
-**Memory Write Mirroring:**
+### Tools Layer
+- Purpose: Expose cognitive memory operations to the model
+- Contains: `get_tool_schemas()` ([SEARCH, PROFILE, REMEMBER]), `handle_tool_call()` (dispatches to `_tool_search`, `_tool_profile`, `_tool_remember`)
+- Key differences from HydraDB:
+  - `muninn_search`: supports `memory_type` filter (12 built-in types), `min_confidence` threshold
+  - `muninn_profile`: dual query — preferences (memory_type=preference) + identity (memory_type=identity)
+  - `muninn_remember`: structured input (concept+content+type+tags) instead of flat text
+  - All 12 memory types listed in tool schema enums
 
-1. Hermes built-in memory system calls `on_memory_write(action, target, content, metadata)`
-2. Circuit breaker check
-3. Spawns daemon thread
-4. Thread formats memory: `"[{target}] {content}"` with optional metadata, `infer=False` (verbatim, no auto-extraction)
-5. Thread calls `client.context.ingest(...)` — fire-and-forget
+### Session Hooks
+- Same pattern as HydraDB: `on_session_end()` ingests session summary, `shutdown()` drains threads and closes HTTP session
 
-**Tool Call Flow:**
+## Cross-Cutting Concerns (Both Providers)
 
-1. Model emits function call (e.g., `hydradb_search`)
-2. Hermes runtime calls `handle_tool_call(tool_name, args)`
-3. Dispatched to `_tool_search`, `_tool_profile`, or `_tool_conclude`
-4. `_tool_search`: synchronous `client.query(mode="fast", max_results=5)` → `_format_chunks(min_score=0.2)` → JSON `{"result": ...}`
-5. `_tool_profile`: synchronous `client.query(query="user profile preferences traits", mode="thinking")` → `_format_chunks(min_score=0.2)` → JSON
-6. `_tool_conclude`: synchronous `client.context.ingest(infer=False, upsert="true")` → JSON `{"result": "Fact stored."}`
-7. All exceptions caught, returned as JSON `{"error": msg}`
+### Circuit Breaker
+- **Dual independent gauges** — read failures don't trip write breaker and vice versa
+- Each gauge: 5 consecutive failures → 120s cooldown
+- Read gauge guards: `queue_prefetch`, `_tool_search`, `_tool_profile`
+- Write gauge guards: `sync_turn`, `on_memory_write`, `_tool_remember`/`_tool_conclude`, `on_session_end`
+- State: `_read_failures`, `_write_failures` (int), `_read_breaker_open_until`, `_write_breaker_open_until` (epoch float)
+- All gauge state protected by `_breaker_lock` (threading.Lock)
 
-**Session End Flow:**
+### Thread Safety
+- Client protected by `threading.Lock` with double-checked locking (HydraDB) / HTTP session reused (MuninnDB)
+- Prefetch result protected by `threading.Lock` (atomic get + clear)
+- Circuit breaker counters accessed under `_breaker_lock`
 
-1. Hermes runtime calls `on_session_end(messages)`
-2. Guard: skip if non-primary context or circuit breaker open
-3. Spawns daemon thread
-4. Thread extracts last 10 user/assistant messages from the last 20 total messages
-5. Thread formats as `"User: ...\nAssistant: ..."` with `infer=True`
-6. Thread calls `client.context.ingest(...)` — fire-and-forget
+### Error Handling
+- Fail-open: all exceptions caught, logged at DEBUG, silently discarded
+- Tool calls return JSON `{"error": str(e)}` — model sees error, agent continues
+- Daemon threads silently terminate on exception
+- Config errors catch `JSONDecodeError` + `OSError`, log warning, return defaults
 
-**State Management:**
-- No persistent local state beyond `hydradb.json` config
-- All memory state lives in HydraDB cloud
-- In-memory state is transient: `_prefetch_result` (one turn cache), `_client` (SDK singleton), `_failure_count` / `_breaker_open_until` (circuit breaker)
-- Threading primitives (`_client_lock`, `_prefetch_lock`) are session-scoped
-
-## Key Abstractions
-
-**MemoryProvider (ABC):**
-- Purpose: Hermes Agent abstract base class defining the memory provider contract
-- Implemented by: `HydraDBMemoryProvider`
-- Pattern: Abstract Base Class — defines required interface (`initialize`, `prefetch`, `queue_prefetch`, `sync_turn`, `get_tool_schemas`, `handle_tool_call`, `system_prompt_block`, `is_available`, `shutdown`)
-- Import: `from agent.memory_provider import MemoryProvider`
-
-**Plugin Registration:**
-- Purpose: Entry point for Hermes plugin discovery
-- Implemented by: module-level `register(ctx)` function
-- Pattern: Single-call registration — `ctx.register_memory_provider(HydraDBMemoryProvider())`
-- Location: `hydradb-memory/__init__.py` lines 556–558
-
-**Threaded I/O (Daemon Threads):**
-- Purpose: Keep all I/O operations non-blocking to the agent runtime
-- Examples: `queue_prefetch` spawns `hydradb-prefetch` thread, `sync_turn` spawns `hydradb-sync` thread, `on_memory_write` and `on_session_end` spawn anonymous threads
-- Pattern: Each operation creates a new daemon thread — no thread pool, no queue
-- Lifecycle: Threads joined in `shutdown()` with 5s timeout
-
-**Circuit Breaker:**
-- Purpose: Prevent retry storms when HydraDB is unreachable
-- Pattern: Count-based with fixed cooldown (5 failures → 120s)
-- State: `_failure_count` (int), `_breaker_open_until` (epoch float)
-- Behavior: When open, `queue_prefetch`, `sync_turn`, `on_memory_write`, and `on_session_end` return immediately without attempting I/O
-
-**Format Chunks:**
-- Purpose: Extract clean memory text from HydraDB query results, avoiding `build_string()` framing overhead
-- Pattern: Static method; iterates `result.data.chunks`, filters by `relevancy_score >= min_score`, extracts `chunk_content`, joins with `\n\n`
-
-## Entry Points
-
-**Plugin Registration:**
-- Location: `hydradb-memory/__init__.py` → `register(ctx)` function
-- Triggers: Hermes Agent plugin loader discovers `plugin.yaml` and calls `register(ctx)`
-- Responsibilities: Register the `HydraDBMemoryProvider` instance with the Hermes runtime
-
-**Provider Lifecycle:**
-- Location: `HydraDBMemoryProvider.initialize()`
-- Triggers: Called by Hermes runtime after registration, once per session
-- Responsibilities: Load config, resolve tenant/sub_tenant identity, initialize threading primitives and circuit breaker
-
-**Turn-Level Entry:**
-- `queue_prefetch(query)` — called before each model turn to start background memory fetch
-- `prefetch()` — called during prompt assembly to retrieve cached results
-- `sync_turn(user, assistant)` — called after each turn to persist the exchange
-- `handle_tool_call(name, args)` — called when model invokes a memory tool
-
-## Error Handling
-
-**Strategy:** Fail-open with circuit breaker — errors are caught, logged at DEBUG, and silently discarded. The circuit breaker prevents retry storms after 5 consecutive failures.
-
-**Patterns:**
-- All I/O operations wrapped in `try/except Exception` — never crash the agent
-- `_record_success()` resets failure count and breaker on any successful operation
-- `_record_failure()` increments count; at threshold 5, sets `_breaker_open_until = now + 120s`
-- Circuit breaker guards: `queue_prefetch`, `sync_turn`, `on_memory_write`, `on_session_end` check `_is_breaker_open()` before attempting I/O
-- Tool calls: `handle_tool_call` catches exceptions and returns JSON `{"error": str(e)}` — model sees the error but agent continues
-- Thread failures: daemon threads silently terminate on exception (no join required)
-- Config errors: `_load_config()` catches `JSONDecodeError` and `OSError`, logs warning, returns defaults
-
-## Cross-Cutting Concerns
-
-**Logging:**
+### Logging
 - Standard `logging.getLogger(__name__)` — module-level logger
-- INFO: initialization details (tenant, sub_tenant, mode)
+- INFO: initialization details (vault/tenant, mode)
 - WARNING: config load failures, circuit breaker open
-- DEBUG: I/O failures (prefetch, sync_turn, on_memory_write, on_session_end)
+- DEBUG: I/O failures (prefetch, sync_turn, on_memory_write, on_session_end) with exc_info=True
 
-**Thread Safety:**
-- `_client` protected by `threading.Lock` with double-checked locking
-- `_prefetch_result` protected by `threading.Lock` (atomic get + clear)
-- `_failure_count` and `_breaker_open_until` accessed without lock (simple int/float on CPython with GIL — acceptable for non-critical counter)
+### Configuration
+- Secrets: environment variables only (`HYDRA_DB_API_KEY`, `MUNINN_API_KEY`)
+- Non-secret config: JSON files in `$HERMES_HOME` (`hydradb.json`, `muninn.json`) merge over module-level `DEFAULT_CONFIG`
+- HydraDB: `sub_tenant_id` auto-resolves to profile name for per-profile isolation
+- MuninnDB: `vault` defaults to `"default"` — use per-profile vault names for isolation
 
-**Configuration:**
-- Secrets (`HYDRA_DB_API_KEY`): environment variable only
-- Non-secret config (`tenant_id`, `sub_tenant_id`, `query_mode`, `query_by`, `max_results`): `~/.hermes/hydradb.json` overrides module-level `DEFAULT_CONFIG`
-- `sub_tenant_id` auto-resolves to `agent_identity` (profile name) for per-profile isolation — zero-config default
-
-**Isolation:**
-- Single HydraDB tenant (`tenant_id`) shared across all Hermes profiles
-- Per-profile isolation via `sub_tenant_id` — defaults to profile name
-- Set `sub_tenant_id: "shared"` for cross-profile memory
-- Primary/secondary agent context guard: `sync_turn` and `on_session_end` skip if `_agent_context != "primary"`
+### Agent Context Guard
+- `sync_turn` and `on_session_end` skip if `_agent_context != "primary"` — prevents cron/subagent/flush contexts from polluting memory
 
 ---
 
