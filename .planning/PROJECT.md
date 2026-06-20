@@ -1,99 +1,111 @@
-# HydraDB Memory Provider
+# Memory Provider Plugins for Hermes Agent
 
 ## What This Is
 
-A Hermes Agent memory provider plugin backed by HydraDB Cloud — a managed graph database. Replaces Hermes' built-in file-based memory with persistent, cross-session, graph-enriched semantic retrieval shared across all profiles. One HydraDB tenant isolates per-profile memories via sub-tenant IDs, with a future path to promote universal facts to a shared sub-tenant.
+Two Hermes Agent memory provider plugins:
+
+1. **HydraDB Memory Provider** — cloud-backed persistent memory using HydraDB's managed graph database. Replaces Hermes' built-in file-based memory with persistent, cross-session, graph-enriched semantic retrieval shared across all profiles. One HydraDB tenant isolates per-profile memories via sub-tenant IDs.
+
+2. **MuninnDB Memory Provider** — local cognitive memory using MuninnDB's neuroscience-inspired engine. ACT-R temporal scoring (frequent access strengthens recall; stale memories fade), Hebbian co-activation learning (memories used together auto-associate), Bayesian confidence tracking (contradicted memories are discounted), and 16 typed relationship types — all engine-native. One Muninn vault per profile for isolation.
 
 ## Core Value
 
-Persistent searchable memory that survives across Hermes sessions and profiles — replacing ephemeral per-session context with durable, retrievable knowledge.
+Persistent searchable memory that survives across Hermes sessions and profiles — replacing ephemeral per-session context with durable, retrievable knowledge. Two backends serving the same contract — swap by changing one config value.
 
 ## Requirements
 
-### Validated
-
-<!-- Existing implementation — tested against design spec and live API -->
+### Validated — HydraDB Provider
 
 - ✓ Config layer: env (`HYDRA_DB_API_KEY`) + JSON (`hydradb.json`) — implemented
 - ✓ Lifecycle: `name`, `is_available()`, `initialize()` — implemented
 - ✓ Read path: `system_prompt_block()`, `prefetch()`, `queue_prefetch()` with `_format_chunks()` — implemented
 - ✓ Write path: `sync_turn()` (infer=true) — implemented
-- ✓ `on_memory_write()` add/replace path (infer=false) — implemented
+- ✓ `on_memory_write()` add/replace/delete paths with content-hash IDs — implemented
 - ✓ Tools: `hydradb_search`, `hydradb_profile`, `hydradb_conclude` with OpenAI schemas — implemented
-- ✓ Circuit breaker: 5 consecutive failures → 120s cooldown — implemented
+- ✓ Circuit breaker: dual read/write gauges, 5 consecutive failures → 120s cooldown — implemented
 - ✓ Lazy thread-safe client via `threading.Lock` — implemented
+- ✓ Tenant auto-provisioning: create if missing, poll until ready, handle 409 conflict — implemented
+- ✓ `on_session_end()` ingest session summary as episodic memory — implemented
+- ✓ `shutdown()` drain-threads: join background threads with 5s timeout — implemented
+- ✓ Hermes integration: plugin installed in-tree, `hermes memory setup hydradb`, `hermes doctor` clean — deployed
+- ✓ Cross-profile activation: all gateway profiles use hydradb provider — deployed
+
+### Validated — MuninnDB Provider
+
+- ✓ Config layer: env (`MUNINN_API_KEY`) + JSON (`muninn.json`) — implemented
+- ✓ Lifecycle: `name`, `is_available()`, `initialize()` — implemented
+- ✓ Read path: `system_prompt_block()`, `prefetch()`, `queue_prefetch()` with `_format_activations()` — implemented
+- ✓ Write path: `sync_turn()`, `on_memory_write()`, `on_session_end()` — implemented
+- ✓ Tools: `muninn_search` (with memory_type + min_confidence), `muninn_profile` (dual query: preferences + identity), `muninn_remember` (concept + content + type + tags) — implemented
+- ✓ Circuit breaker: dual read/write gauges — implemented
+- ✓ HTTP session management via `requests.Session` with bearer auth — implemented
+- ✓ 12 memory type enums exposed to model via tool schemas — implemented
 
 ### Active
 
-<!-- Current scope — building toward these -->
-
-- [ ] Tenant auto-provisioning (`_ensure_tenant`): create if missing, poll until ready, handle 409 conflict
-- [ ] `on_memory_write()` delete path with stable content-hash IDs
-- [ ] `shutdown()` drain-threads: join `_prefetch_thread`, `_sync_thread`, `_mirror_thread`
-- [ ] `on_session_end()` ingest session summary as episodic memory
-- [ ] Test suite: fake HydraDB client, 5 test classes (config, queries, writes, circuit breaker, shutdown)
-- [ ] Live API verification: all SDK calls confirmed against HydraDB Cloud
-- [ ] Hermes integration: install plugin in-tree, `hermes memory setup hydradb`, `hermes doctor` clean
-- [ ] Cross-profile activation: all gateway profiles use hydradb provider
+- [ ] Live API verification: all MuninnDB REST calls confirmed against running MuninnDB instance
+- [ ] Test suite: fake clients for both providers
+- [ ] HydraDB provider: expose `recency_bias`, `alpha`, `metadata_filters` as tool params (cookbook research complete)
 
 ### Out of Scope
 
-- Shared sub-tenant promotion path — deferred to future milestone (requires taxonomy discovery first)
-- Same-turn write visibility cache — v2 enhancement, not needed for cross-session memory
+- Shared sub-tenant / cross-vault promotion path — deferred to future milestone
+- Same-turn write visibility cache — v2 enhancement
 - Batch query or memory deduplication — v2
-- AsyncHydraDB client — sync-only per Hermes provider contract
-- Self-hosted HydraDB — cloud-only, free tier sufficient for personal use
+- Async SDK clients — sync-only per Hermes provider contract
+- Self-hosted HydraDB — cloud-only, free tier sufficient
 
 ## Context
 
-**Existing codebase:** 558-line skeleton at `hydradb-memory/__init__.py` implements the core provider class with config, lifecycle, read/write paths, tools, and circuit breaker. `plugin.yaml` declares the dependency (`hydradb-sdk>=2,<3`). No tests exist.
+**HydraDB provider:** 735-line implementation at `hydradb-memory/__init__.py` — complete MemoryProvider with config, lifecycle, read/write paths, tools, session hooks, and dual circuit breaker. Plugin deployed in-tree and active on all Hermes profiles.
 
-**Design reference:** `research/hydradb-provider-design.html` — comprehensive architecture document with 10 design decisions, method specifications, data flow diagrams, SDK reference, testing strategy, and open questions. All research complete.
+**MuninnDB provider:** 760-line implementation at `muninn-memory/__init__.py` — complete MemoryProvider backed by MuninnDB REST API. All cognitive features (ACT-R scoring, Hebbian learning, confidence tracking) are engine-native — the plugin is a thin HTTP adapter.
 
-**Codebase map:** `.planning/codebase/` (7 documents) — stack (Python 3.12, hydradb-sdk 2.0.1), architecture (Plugin/Provider pattern, 7 layers), structure (single-file monolith), conventions (snake_case, Google docstrings, threading patterns), integrations (HydraDB Cloud API v2), concerns (9 tech debt items including untracked threads, race conditions, bare except blocks).
+**Research:** `research/hydradb-provider-design.md` (architecture blueprint), `research/hydradb-v2-research.md` (HydraDB API reference), `research/hermes-memory-provider-research.md` (provider contract research). Cookbook research completed for `recency_bias`, `alpha`, `metadata_filters`, `graph_context` enhancements.
 
-**Target deployment:** `~/.hermes/hermes-agent/plugins/memory/hydradb/` — in-tree plugin discovered by all profiles.
+**Codebase map:** `.planning/codebase/` (7 documents) — stack, architecture, structure, conventions, integrations, testing, concerns.
+
+**Target deployment:** `~/.hermes/hermes-agent/plugins/memory/hydradb/` and `.../muninn/` — in-tree plugins discovered by all profiles.
 
 ## Constraints
 
-- **Tech stack:** Python 3.12+, sync only (no asyncio), `hydradb-sdk==2.0.1`
+- **Tech stack:** Python 3.12+, sync only (no asyncio)
 - **Plugin contract:** Must implement Hermes Agent `MemoryProvider` ABC — never hardcode `~/.hermes`, use `hermes_home` kwarg
-- **Secrets:** `HYDRA_DB_API_KEY` in `~/.hermes/.env`, never committed
-- **Tool naming:** Prefix all memory tools with `hydradb_` to avoid core-tool collisions
-- **API:** `upsert` is `Optional[str]` — pass `"true"` (string), not `True`. Metadata for type=memory must be JSON-encoded string, not object.
-- **Memory format:** `_format_chunks()` extracts clean prose from raw chunks — `build_string()` rejected (72-89% framing overhead)
+- **Secrets:** API keys in `~/.hermes/.env`, never committed
+- **Tool naming:** Prefix memory tools with provider prefix to avoid core-tool collisions (`hydradb_*`, `muninn_*`)
+- **Memory format:** Clean prose extraction from retrieval results — no framing overhead
 
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
-|----------|-----------|---------|
-| In-tree plugin at `~/.hermes/hermes-agent/plugins/memory/hydradb/` | Cross-profile requirement — in-tree is discovered by every profile | ✓ Good |
-| One tenant `"hermes"`, one `sub_tenant_id` per profile (1:1) | Start isolated, promote to `"shared"` when taxonomy understood | ✓ Good |
-| `HydraDB` (sync), not `AsyncHydraDB` | Hermes providers are synchronous — no asyncio | ✓ Good |
-| Fire-and-forget writes on daemon threads | `sync_turn()` and `on_memory_write()` must not block agent runtime | ✓ Good |
+|---|---|---|
+| Two providers, one ABC | Different trade-offs: cloud convenience vs cognitive depth. Swap by config. | ✓ Good |
+| In-tree plugins at `~/.hermes/hermes-agent/plugins/memory/` | Cross-profile — in-tree discovered by every profile | ✓ Good |
+| HydraDB: one tenant, one sub_tenant per profile | Start isolated, promote to "shared" for universal facts | ✓ Good |
+| Muninn: one vault per profile | Flat isolation model, no sub-tenant equivalent | ✓ Good |
+| Sync-only SDKs | Hermes providers are synchronous — no asyncio | ✓ Good |
+| Fire-and-forget writes on daemon threads | `sync_turn()` and `on_memory_write()` must not block | ✓ Good |
 | `queue_prefetch()` → background query, `prefetch()` returns cached | Same pattern as mem0 — read is non-blocking | ✓ Good |
-| Circuit breaker: 5 failures → 120s cooldown | Cloud provider — same pattern as mem0 | ✓ Good |
-| `sync_turn` uses `infer: true`, `on_memory_write` uses `infer: false` | sync_turn sends raw conversation for auto-extraction; on_memory_write stores verbatim | ✓ Good |
-| Three tools: search, profile, conclude | Same pattern as mem0, prefixed to avoid collisions | ✓ Good |
-| `_format_chunks()` instead of `build_string()` | build_string has 72-89% overhead — user prefers clean prose | ✓ Good |
-| `metadata` as JSON string for type=memory | SDK requires JSON-encoded string, not object — returns 400 otherwise | ✓ Good |
+| Dual circuit breaker (read/write independent) | Read failures shouldn't block writes and vice versa | ✓ Good |
+| `sync_turn` uses `infer: true`, `on_memory_write` uses `infer: false` | Auto-extraction for conversation, verbatim for curated entries | ✓ Good |
 
 ## Evolution
 
 This document evolves at phase transitions and milestone boundaries.
 
-**After each phase transition** (via `/gsd-transition`):
+**After each phase transition:**
 1. Requirements invalidated? → Move to Out of Scope with reason
 2. Requirements validated? → Move to Validated with phase reference
 3. New requirements emerged? → Add to Active
 4. Decisions to log? → Add to Key Decisions
 5. "What This Is" still accurate? → Update if drifted
 
-**After each milestone** (via `/gsd-complete-milestone`):
+**After each milestone:**
 1. Full review of all sections
 2. Core Value check — still the right priority?
 3. Audit Out of Scope — reasons still valid?
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-20 after initialization*
+
+*Last updated: 2026-06-20 — documentation pass*

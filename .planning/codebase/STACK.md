@@ -1,14 +1,18 @@
 # Technology Stack
 
 **Analysis Date:** 2026-06-20
+**Updated:** 2026-06-20 — documentation pass (added MuninnDB provider)
 
 ## Languages
 
 **Primary:**
-- Python 3.12 - All application code (hydradb-memory/__init__.py, 558 lines)
+- Python 3.12 — All application code
 
-**Secondary:**
-- None (no build scripts, no templating, no shell tooling beyond standard Linux utilities)
+**HydraDB Provider** (`hydradb-memory/__init__.py`, 735 lines):
+- Pure Python, single-file module
+
+**MuninnDB Provider** (`muninn-memory/__init__.py`, 760 lines):
+- Pure Python, single-file module
 
 ## Runtime
 
@@ -18,61 +22,60 @@
 - No browser runtime (server-side/agent plugin only)
 
 **Package Manager:**
-- pip (via virtualenv) — no pyproject.toml, setup.py, or requirements.txt present; dependency declared in plugin.yaml: `hydradb-sdk>=2,<3`
-- Lockfile: None (hydradb-sdk installed directly into .venv)
+- pip (via virtualenv) — no pyproject.toml, setup.py, or requirements.txt present
+- Dependencies declared in plugin.yaml per provider
 
 ## Frameworks
 
 **Core:**
-- Hermes Agent MemoryProvider ABC — from `agent.memory_provider`; the plugin implements `HydraDBMemoryProvider(MemoryProvider)` with lifecycle methods (is_available, initialize, shutdown), read path (prefetch, queue_prefetch, system_prompt_block), write path (sync_turn, on_memory_write, on_session_end), and tool dispatch (get_tool_schemas, handle_tool_call)
+- Hermes Agent MemoryProvider ABC — from `agent.memory_provider`
+- HydraDB provider: `HydraDBMemoryProvider(MemoryProvider)` — 735 lines
+- MuninnDB provider: `MuninnDBMemoryProvider(MemoryProvider)` — 760 lines
 
 **Testing:**
-- None (no test framework in project; test suite planned in SPEC.md Phase 2)
+- None (no test framework in project; test suite planned)
 
 **Build/Dev:**
-- None (plugin is deployed by copying files into `~/.hermes/hermes-agent/plugins/memory/hydradb/`)
+- None (plugins deployed by copying files into `~/.hermes/hermes-agent/plugins/memory/`)
 
 ## Key Dependencies
 
-**Critical:**
-- hydradb-sdk 2.0.1 (installed in .venv) — Cloud client for HydraDB managed memory service; provides `HydraDB` sync client with query, context.ingest, and tenant management
+**HydraDB Provider:**
+- `hydradb-sdk>=2,<3` — Cloud client for HydraDB managed memory service; provides `HydraDB` sync client with `query`, `context.ingest`, and tenant management
+- Standard library: `json`, `logging`, `os`, `threading`, `time`, `hashlib`
 
-**Standard Library:**
-- json — Config serialization, tool call results, ingest payloads
-- logging — Structured logging via `logging.getLogger(__name__)`
-- os — Environment variable reads (HYDRA_DB_API_KEY, HERMES_HOME)
-- threading — Daemon threads for fire-and-forget writes, background prefetch queries, thread-safe client singleton
+**MuninnDB Provider:**
+- `requests>=2.31` — Sync HTTP client for MuninnDB REST API (`POST /api/engrams`, `POST /api/activate`, `GET /api/health`)
+- Standard library: `json`, `logging`, `os`, `threading`, `time`
 
 **Imports from agent:**
-- `agent.memory_provider.MemoryProvider` — The ABC the provider inherits from
+- `agent.memory_provider.MemoryProvider` — The ABC both providers inherit from
 
 ## Configuration
 
-**Environment:**
-- `HYDRA_DB_API_KEY` — required; HydraDB API key (Bearer token), stored in `~/.hermes/.env`
-- `HERMES_HOME` — optional; defaults to `~/.hermes`; used to locate `hydradb.json` and `.env`
+### HydraDB Provider
+- `HYDRA_DB_API_KEY` — required; Bearer token, stored in `~/.hermes/.env`
+- `~/.hermes/hydradb.json` — non-secret: `tenant_id`, `sub_tenant_id`, `query_mode`, `query_by`, `max_results`
+- `~/.hermes/config.yaml` — `memory.provider: "hydradb"`
 
-**Config file:**
-- `~/.hermes/hydradb.json` — non-secret config: `tenant_id` (default "hermes"), `sub_tenant_id` (auto = profile name), `query_mode` ("thinking" or "fast"), `query_by` ("hybrid"), `max_results` (10)
-
-**Activation:**
-- `~/.hermes/config.yaml` — `memory.provider: "hydradb"` activates the provider per-profile
-
-**Build:**
-- None (no build step; pure Python plugin)
+### MuninnDB Provider
+- `MUNINN_API_KEY` — optional; Bearer token (not needed for default vault), stored in `~/.hermes/.env`
+- `~/.hermes/muninn.json` — non-secret: `base_url` (default `http://127.0.0.1:8475`), `vault` (default `"default"`)
+- `~/.hermes/config.yaml` — `memory.provider: "muninn"`
 
 ## Platform Requirements
 
 **Development:**
 - Linux (x86_64) — primary development environment
 - Python 3.12+ with virtualenv
-- Network access to `https://api.hydradb.com` for live testing
+- Network access to `https://api.hydradb.com` (HydraDB provider)
+- Local MuninnDB server at `http://127.0.0.1:8475` (MuninnDB provider)
 
 **Production:**
-- Any platform with Python 3.12+ (the plugin is a Hermes Agent in-tree plugin)
-- Deployed by copying `hydradb-memory/` to `~/.hermes/hermes-agent/plugins/memory/hydradb/`
-- Requires `pip install hydradb-sdk>=2,<3` in the Hermes Agent virtualenv
-- Requires valid `HYDRA_DB_API_KEY` environment variable
+- Any platform with Python 3.12+ (plugins are Hermes Agent in-tree plugins)
+- Deployed by copying `hydradb-memory/` and/or `muninn-memory/` to `~/.hermes/hermes-agent/plugins/memory/`
+- HydraDB: requires `hydradb-sdk>=2,<3` in Hermes Agent virtualenv + `HYDRA_DB_API_KEY`
+- MuninnDB: requires `requests>=2.31` + running MuninnDB server
 
 ---
 

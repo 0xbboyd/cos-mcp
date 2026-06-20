@@ -1,19 +1,22 @@
 # Codebase Structure
 
 **Analysis Date:** 2026-06-20
+**Updated:** 2026-06-20 — documentation pass (added MuninnDB provider)
 
 ## Directory Layout
 
 ```
 cos-mcp/
-├── hydradb-memory/              # Plugin package — the main deliverable
-│   ├── __init__.py               # HydraDBMemoryProvider class (558 lines)
+├── hydradb-memory/              # HydraDB provider plugin
+│   ├── __init__.py               # HydraDBMemoryProvider class (735 lines)
 │   ├── plugin.yaml               # Hermes plugin manifest
 │   ├── README.md                 # User-facing setup and usage guide
-│   ├── SPEC.md                   # Specification, roadmap, and constraints
-│   └── .gitignore                # Git exclusion rules
+│   └── SPEC.md                   # Specification, roadmap, and constraints
+├── muninn-memory/               # MuninnDB provider plugin
+│   ├── __init__.py               # MuninnDBMemoryProvider class (760 lines)
+│   └── plugin.yaml               # Hermes plugin manifest
 ├── research/                     # Research and design documents
-│   ├── hydradb-provider-design.md     # Full design blueprint
+│   ├── hydradb-provider-design.md     # HydraDB design blueprint
 │   ├── hydradb-v2-research.md         # HydraDB v2 API reference
 │   ├── hermes-memory-provider-research.md  # Hermes memory provider contract
 │   ├── hydradb-provider-design.html     # Rendered design doc
@@ -24,8 +27,18 @@ cos-mcp/
 │   ├── plans/                    # Historical execution plans
 │   └── scripts/                  # Utility scripts
 ├── .planning/                    # Codebase analysis artifacts
+│   ├── PROJECT.md                # Project overview and requirements
+│   ├── ROADMAP.md                # Development roadmap
+│   ├── STATE.md                  # Current development state
+│   ├── REQUIREMENTS.md           # Detailed requirements
+│   ├── v1.0-COMPLETION.md        # Milestone completion summary
+│   ├── v1.0-MILESTONE-AUDIT.md   # Milestone audit
+│   ├── milestones/               # Per-milestone planning
+│   ├── research/                 # GSD research outputs
 │   └── codebase/                 # This directory
 │       ├── ARCHITECTURE.md       # Conceptual architecture
+│       ├── CONVENTIONS.md        # Code conventions
+│       ├── STACK.md              # Technology stack
 │       └── STRUCTURE.md          # Physical file organization (this file)
 └── .venv/                        # Python virtual environment (gitignored)
 ```
@@ -33,143 +46,100 @@ cos-mcp/
 ## Directory Purposes
 
 **hydradb-memory/:**
-- Purpose: The plugin package — contains all deliverable code for the HydraDB Memory Provider
-- Contains: Python source (`__init__.py`), plugin manifest (`plugin.yaml`), documentation (`README.md`, `SPEC.md`), git config (`.gitignore`, `.git/`)
-- Key files: `__init__.py` (entire provider implementation), `plugin.yaml` (declares name, version, dependencies, hooks)
-- Subdirectories: None (flat; all code lives in `__init__.py`)
+- Purpose: HydraDB cloud-backed memory provider plugin
+- Contains: Python source (`__init__.py`), plugin manifest (`plugin.yaml`), documentation (`README.md`, `SPEC.md`)
+- Key files: `__init__.py` (735 lines), `plugin.yaml` (name: hydradb, dep: hydradb-sdk>=2,<3)
+- Subdirectories: None (flat; all code in `__init__.py`)
+
+**muninn-memory/:**
+- Purpose: MuninnDB local cognitive memory provider plugin
+- Contains: Python source (`__init__.py`), plugin manifest (`plugin.yaml`)
+- Key files: `__init__.py` (760 lines), `plugin.yaml` (name: muninn, dep: requests>=2.31)
+- Subdirectories: None (flat; all code in `__init__.py`)
 
 **research/:**
-- Purpose: Reference materials and design documents that informed the implementation
+- Purpose: Reference materials and design documents that informed implementation
 - Contains: Markdown design docs, HTML rendered version, audio summary
-- Key files: `hydradb-provider-design.md` (blueprint with architecture decisions), `hydradb-v2-research.md` (SDK API reference), `hermes-memory-provider-research.md` (provider contract research)
+- Key files: `hydradb-provider-design.md` (blueprint), `hydradb-v2-research.md` (API reference), `hermes-memory-provider-research.md` (provider contract)
 - Subdirectories: None (flat)
 
 **.hermes/:**
-- Purpose: GSD (Gated Software Delivery) runtime infrastructure — managed by the GSD system, not hand-edited
+- Purpose: GSD (Gated Software Delivery) runtime infrastructure — managed by GSD, not hand-edited
 - Contains: Agent definitions, core workflows, historical plans, utility scripts
-- Key files: Agent definitions in `agents/` (gsd-planner, gsd-executor, gsd-code-reviewer, etc.), workflows in `gsd-core/workflows/` (multi-step procedures)
-- Subdirectories: `agents/` (30+ sub-agent markdown files), `gsd-core/` (workflows, templates, references), `plans/`, `scripts/`
+- Subdirectories: `agents/`, `gsd-core/`, `plans/`, `scripts/`
 
 **.planning/:**
-- Purpose: Codebase analysis artifacts generated by the GSD codebase-mapper
-- Contains: `codebase/ARCHITECTURE.md` and `codebase/STRUCTURE.md` (this file)
-- Key files: These two files
-- Subdirectories: `codebase/`
+- Purpose: Codebase analysis artifacts generated by GSD codebase-mapper
+- Contains: Project docs, roadmap, state, codebase analysis
+- Key files: `PROJECT.md`, `codebase/ARCHITECTURE.md`, `codebase/STRUCTURE.md`
+- Subdirectories: `codebase/`, `milestones/`, `research/`
 
 **.venv/:**
 - Purpose: Python virtual environment with installed dependencies
-- Contains: Python interpreter, installed packages (including `hydradb-sdk==2.0.1`)
-- Source: Created by `python3 -m venv .venv`
-- Committed: No (gitignored via `__pycache__/`, `*.pyc`, `.venv/` rules)
+- Contains: Python interpreter, installed packages
+- Committed: No (gitignored)
 
 ## Key File Locations
 
 **Entry Points:**
-- `hydradb-memory/__init__.py` → `register(ctx)`: Plugin entry point — registers `HydraDBMemoryProvider` with Hermes runtime (lines 556–558)
-- `hydradb-memory/plugin.yaml`: Plugin manifest — declares name (`hydradb`), version, pip dependencies, required env vars, and hooks (lines 1–10)
+- `hydradb-memory/__init__.py` → `register(ctx)`: Plugin entry — registers `HydraDBMemoryProvider`
+- `muninn-memory/__init__.py` → `register(ctx)`: Plugin entry — registers `MuninnDBMemoryProvider`
+- `hydradb-memory/plugin.yaml`, `muninn-memory/plugin.yaml`: Plugin manifests
 
 **Configuration:**
-- `~/.hermes/.env` (external): `HYDRA_DB_API_KEY` environment variable — API credential
-- `~/.hermes/hydradb.json` (external): Non-secret config overrides — `tenant_id`, `sub_tenant_id`, `query_mode`, `query_by`, `max_results`
-- `hydradb-memory/__init__.py` → `DEFAULT_CONFIG`: Module-level defaults (lines 81–88)
-
-**Core Logic:**
-- `hydradb-memory/__init__.py` → `HydraDBMemoryProvider`: The entire provider implementation (lines 117–549)
-  - Config: `_load_config()`, `get_config_schema()`, `save_config()` (lines 134–184)
-  - Lifecycle: `name`, `is_available()`, `initialize()` (lines 130, 188–237)
-  - Client: `_get_client()` (lines 241–249)
-  - Circuit breaker: `_is_breaker_open()`, `_record_success()`, `_record_failure()` (lines 253–268)
-  - Read path: `system_prompt_block()`, `prefetch()`, `queue_prefetch()`, `_format_chunks()` (lines 272–337)
-  - Write path: `sync_turn()`, `on_memory_write()` (lines 341–420)
-  - Tools: `get_tool_schemas()`, `handle_tool_call()`, `_tool_search()`, `_tool_profile()`, `_tool_conclude()` (lines 32–75, 424–495)
-  - Session hooks: `on_session_end()`, `shutdown()` (lines 499–548)
-- `hydradb-memory/__init__.py` → Tool schemas: `SEARCH_SCHEMA`, `PROFILE_SCHEMA`, `CONCLUDE_SCHEMA` (lines 32–75)
-
-**Documentation:**
-- `hydradb-memory/README.md`: User-facing setup guide (installation, API key, activation, tools reference)
-- `hydradb-memory/SPEC.md`: Development specification (current state, architecture decisions, phases, constraints)
-- `research/hydradb-provider-design.md`: Full design blueprint
-- `research/hydradb-v2-research.md`: HydraDB v2 API and SDK reference
+- `~/.hermes/.env` (external): API keys (`HYDRA_DB_API_KEY`, `MUNINN_API_KEY`)
+- `~/.hermes/hydradb.json` (external): HydraDB non-secret config
+- `~/.hermes/muninn.json` (external): MuninnDB non-secret config
 
 **Testing:**
-- No test files exist yet (Phase 2: Integration Testing planned — `test_hydradb_provider.py` with fake client)
+- No test files exist yet (Phase 2: Integration Testing planned)
 
 ## Naming Conventions
 
 **Files:**
 - `__init__.py`: Python package entry point — contains all implementation
-- `plugin.yaml`: Hermes plugin manifest (lowercase, `.yaml` extension)
+- `plugin.yaml`: Hermes plugin manifest
 - `README.md`, `SPEC.md`: UPPERCASE markdown for important project files
-- `*.md`: Research and documentation (kebab-case: `hydradb-provider-design.md`, `hydradb-v2-research.md`)
+- `*.md`: Research and documentation (kebab-case)
 - `.gitignore`: Dotfile for git config
 
 **Directories:**
-- `hydradb-memory/`: kebab-case with hyphen — plugin package name
+- `hydradb-memory/`, `muninn-memory/`: kebab-case — plugin package names
 - `research/`: singular noun — contains research documents
-- `.hermes/`, `.planning/`, `.venv/`: dot-prefixed for hidden/infrastructure directories
+- `.hermes/`, `.planning/`, `.venv/`: dot-prefixed for hidden/infrastructure
 
 **Class and Method Names:**
-- `HydraDBMemoryProvider`: PascalCase class name
-- `_load_config`, `_get_client`, `_is_breaker_open`: snake_case with underscore prefix for private methods
-- `queue_prefetch`, `sync_turn`, `on_memory_write`: snake_case public/protected methods matching ABC contract
+- `HydraDBMemoryProvider`, `MuninnDBMemoryProvider`: PascalCase
+- `_load_config`, `_get_client`, `_is_breaker_open`: snake_case with underscore prefix for private
+- `queue_prefetch`, `sync_turn`, `on_memory_write`: snake_case public/protected matching ABC contract
+- `_tool_*`: Internal tool handler methods
 
-**Special Patterns:**
-- `*.json`: Config files (`hydradb.json`) — lowercase, no prefix
-- `hydradb_*`: Tool name prefix — ensures no collision with core Hermes tools
-- `_tool_*`: Internal tool handler methods (`_tool_search`, `_tool_profile`, `_tool_conclude`)
+**Tool Prefixes:**
+- HydraDB: `hydradb_search`, `hydradb_profile`, `hydradb_conclude`
+- MuninnDB: `muninn_search`, `muninn_profile`, `muninn_remember`
 
 ## Where to Add New Code
 
-**New Provider Feature (e.g., batch query, memory dedup):**
-- Primary code: `hydradb-memory/__init__.py` — add method to `HydraDBMemoryProvider` class
-- Schemas (if new tool): Add tool schema constant near `SEARCH_SCHEMA` (lines 31–75), add handler method, update `get_tool_schemas()` and `handle_tool_call()`
-- Tests: Create `hydradb-memory/tests/test_hydradb_provider.py` (does not exist yet)
-- Documentation: Update `hydradb-memory/README.md` if user-facing, `hydradb-memory/SPEC.md` if spec change
+**New Provider Feature:**
+- Primary code: Add method to provider's `__init__.py`
+- Schemas (if new tool): Add schema constant, handler method, update `get_tool_schemas()` and `handle_tool_call()`
+- Tests: Create `tests/` directory when test suite is built
 
 **New Config Option:**
-- Default: Add to `DEFAULT_CONFIG` dict in `hydradb-memory/__init__.py` (lines 81–88)
-- Schema: Add entry in `get_config_schema()` (lines 139–175)
-- Persistence: Already handled by `save_config()` which writes all non-secret keys
-- Docs: Update README config table and SPEC.md
+- Default: Add to `DEFAULT_CONFIG` dict
+- Schema: Add entry in `get_config_schema()`
+- Persistence: Handled by `save_config()` which writes all non-secret keys
 
 **New Lifecycle Hook:**
-- Declaration: Add hook name to `plugin.yaml` → `hooks:` list (line 8–10)
-- Implementation: Add method to `HydraDBMemoryProvider` class in `hydradb-memory/__init__.py`
-- Tests: Add test case when test suite exists
+- Declaration: Add hook name to `plugin.yaml` → `hooks:` list
+- Implementation: Add method to provider class
 
 **New Tool:**
-- Schema: Add constant near lines 31–75 in `hydradb-memory/__init__.py`
-- Registration: Update `get_tool_schemas()` return list (lines 424–427)
-- Handler: Add `_tool_<name>()` method, add dispatch branch in `handle_tool_call()` (lines 429–444)
-- Docs: Update tools table in `hydradb-memory/README.md`
+- Schema: Add constant, register in `get_tool_schemas()`, add handler + dispatch
 
 **Research / Design Docs:**
 - New research: Add `research/<topic>.md`
 - Updated research: Edit existing files in `research/`
-- Research is read-only from code perspective — informs implementation but not imported
-
-**Infrastructure / GSD:**
-- `.hermes/`: Managed by GSD system — do not hand-edit unless directed
-- `.planning/`: Generated by codebase-mapper — regenerate rather than hand-edit
-
-## Special Directories
-
-**.hermes/:**
-- Purpose: GSD runtime infrastructure (agent definitions, workflows, templates)
-- Source: Managed by GSD system and Hermes Agent profile
-- Committed: Yes (in project repo — shared across profiles)
-- Note: Files in `.hermes/` are referenced by path from GSD commands; edit with care
-
-**.planning/:**
-- Purpose: Codebase analysis artifacts generated by `gsd-codebase-mapper`
-- Source: Generated programmatically — see `gsd-core/templates/codebase/` for templates
-- Committed: Yes (analysis artifacts tracked in repo)
-- Note: Regenerate when codebase structure changes significantly
-
-**.venv/:**
-- Purpose: Python virtual environment with project dependencies
-- Source: Created by `python3 -m venv .venv`; packages installed via pip
-- Committed: No (gitignored — see `.gitignore` rules for `__pycache__/`, `*.pyc`, `.venv/`)
 
 ---
 
