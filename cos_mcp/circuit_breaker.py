@@ -1,7 +1,11 @@
-"""Circuit breaker for memory provider resilience.
+"""Circuit breaker for memory provider and context engine resilience.
 
-Provides independent read and write gauges — each trips after 5 consecutive
-failures and opens for 120 seconds. Thread-safe via a shared lock.
+Provides independent read and write gauges — each trips after a configurable
+number of consecutive failures and opens for a configurable cooldown period.
+Thread-safe via a shared lock.
+
+Defaults (v1.0): 5 failures → 120s cooldown (memory providers).
+Context engines typically use 3 failures → 120s cooldown (lower I/O frequency).
 """
 
 from __future__ import annotations
@@ -16,13 +20,23 @@ logger = logging.getLogger(__name__)
 class CircuitBreaker:
     """Dual-gauge circuit breaker with independent read/write tracking.
 
-    Each gauge counts consecutive failures. At 5 failures, the breaker
-    opens for 120 seconds. A single success resets the counter.
+    Each gauge counts consecutive failures. At ``failure_threshold``
+    consecutive failures, the breaker opens for ``cooldown_seconds``.
+    A single success resets the counter.
+
+    Configurable thresholds allow context engines to use a lower
+    ``failure_threshold`` (3 vs 5) for faster trip on infrequent I/O.
 
     Thread-safe: all state transitions hold ``_lock``.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        failure_threshold: int = 5,
+        cooldown_seconds: float = 120.0,
+    ) -> None:
+        self._failure_threshold = failure_threshold
+        self._cooldown_seconds = cooldown_seconds
         self._read_failures = 0
         self._write_failures = 0
         self._read_open_until = 0.0
@@ -50,14 +64,15 @@ class CircuitBreaker:
             self._read_open_until = 0.0
 
     def record_read_failure(self) -> None:
-        """Increment read failure counter; trip at threshold 5."""
+        """Increment read failure counter; trip at configured threshold."""
         with self._lock:
             self._read_failures += 1
-            if self._read_failures >= 5:
-                self._read_open_until = time.time() + 120
+            if self._read_failures >= self._failure_threshold:
+                self._read_open_until = time.time() + self._cooldown_seconds
                 logger.warning(
-                    "%s read circuit breaker OPEN — 120s cooldown",
+                    "%s read circuit breaker OPEN — %ds cooldown",
                     self._label,
+                    self._cooldown_seconds,
                 )
 
     # --- Write gauge ---
@@ -76,12 +91,13 @@ class CircuitBreaker:
             self._write_open_until = 0.0
 
     def record_write_failure(self) -> None:
-        """Increment write failure counter; trip at threshold 5."""
+        """Increment write failure counter; trip at configured threshold."""
         with self._lock:
             self._write_failures += 1
-            if self._write_failures >= 5:
-                self._write_open_until = time.time() + 120
+            if self._write_failures >= self._failure_threshold:
+                self._write_open_until = time.time() + self._cooldown_seconds
                 logger.warning(
-                    "%s write circuit breaker OPEN — 120s cooldown",
+                    "%s write circuit breaker OPEN — %ds cooldown",
                     self._label,
+                    self._cooldown_seconds,
                 )
