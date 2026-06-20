@@ -1,0 +1,12 @@
+name: hydradb-context
+version: 0.1.0
+plugin_type: context_engine
+description: "HydraDB graph-backed context engine — persistent DAG-compressed context with context_search and context_expand tools. Replaces lossy LLM summarization with retrievable graph memory."
+pip_dependencies:
+  - hydradb-sdk>=2,<3
+  - cos-mcp>=0.2.0
+requires_env:
+  - HYDRA_DB_API_KEY
+hooks:
+  - on_session_start
+  - on_session_end
