@@ -6,18 +6,19 @@ Build a Hermes Agent memory provider plugin backed by HydraDB v2 — a managed c
 
 ## Current State
 
-The provider is **complete and deployed**. The implementation at `hydradb-memory/__init__.py` (735 lines) includes:
+The provider is **complete and deployed**. The implementation at `hydradb-memory/__init__.py` (284 lines) is a thin adapter extending `cos_mcp.BaseMemoryProvider`. All shared infrastructure (circuit breaker, threading, config loading, read/write path patterns) lives in the `cos_mcp` package.
 
-- Config layer (`_load_config`, `get_config_schema`, `save_config`)
-- Lifecycle (`name`, `is_available`, `initialize` with tenant auto-provisioning)
-- Lazy thread-safe client with dual circuit breaker (independent read/write gauges, 5 failures / 120s cooldown)
-- Read path: `prefetch` (returns cached), `queue_prefetch` (background query with `_format_chunks`)
-- Write path: `sync_turn` (fire-and-forget, `infer=true`), `on_memory_write` (mirror built-in, `infer=false`, content-hash IDs for delete)
-- Three tools: `hydradb_search`, `hydradb_profile`, `hydradb_conclude`
-- Session hooks: `on_session_end`, `shutdown`
+The plugin defines:
+- Config layer (`_load_config` — env + JSON merge)
+- Subclass hooks (`_create_backend` → HydraDBBackend, `_create_formatter` → HydraDBFormatter)
+- Tool schemas + handlers (`hydradb_search`, `hydradb_profile`, `hydradb_conclude`)
+- System prompt block
+- `get_config_schema()` + `save_config()`
 - `register(ctx)` entry point
 
-A companion **MuninnDB provider** is also available at `../muninn-memory/` — it implements the same `MemoryProvider` ABC against MuninnDB's local cognitive engine (ACT-R temporal scoring, Hebbian learning, Bayesian confidence, 16 typed relationships engine-native).
+A companion **MuninnDB provider** is also available at `../muninn-memory/` — it implements the same `MemoryProvider` ABC against MuninnDB's local cognitive engine.
+
+Additional **context engine plugins** at `../plugins/context_engine/` provide graph/cognitive-backed context compression and retrieval.
 
 `plugin.yaml` and `README.md` also exist.
 
@@ -29,10 +30,11 @@ A companion **MuninnDB provider** is also available at `../muninn-memory/` — i
 4. **Fire-and-forget writes** on daemon threads. Reads: `queue_prefetch` → background query, `prefetch` → cached result.
 5. **Dual circuit breaker**: Independent read and write gauges, each 5 consecutive failures → 120s cooldown. Tool calls check read breaker; writes check write breaker.
 6. **infer mode**: `sync_turn` uses `infer=true` (auto-extract), `on_memory_write` uses `infer=false` (verbatim).
-7. **`_format_chunks()`** instead of `build_string()` — `build_string` has 72-89% framing overhead.
+7. **`HydraDBFormatter.format()`** instead of `build_string()` — `build_string` has 72-89% framing overhead. Formatter extracts `chunk_content` directly from SDK response.
 8. **`upsert="true"`** (string, not bool). **metadata as JSON string** for type=memory.
 9. **Content-hash IDs** on `on_memory_write` for deterministic upsert/delete (`hashlib.sha256`).
 10. **Batched `on_session_end`**: ingests last 10 user/assistant messages from last 20 total.
+11. **Shared infrastructure**: BaseMemoryProvider in `cos_mcp` handles circuit breaker, threading, config loading, read/write paths, and session hooks. Provider is a thin subclass (~284 lines).
 
 ## Verified Facts
 
@@ -47,20 +49,20 @@ A companion **MuninnDB provider** is also available at `../muninn-memory/` — i
 
 ### Phase 1: Core Provider Implementation ✓ COMPLETE
 
-- ✓ `HydraDBMemoryProvider` class with all ABC methods
-- ✓ `_format_chunks()` extracting clean memory text from query results
-- ✓ Tenant auto-provisioning with 409 conflict handling and 5-minute readiness poll
-- ✓ Independent read/write circuit breakers
+- ✓ `HydraDBMemoryProvider` class extending `BaseMemoryProvider`
+- ✓ `HydraDBFormatter` extracting clean memory text from query results (in `cos_mcp`)
+- ✓ `HydraDBBackend` with tenant auto-provisioning, 409 conflict handling, 5-minute readiness poll (in `cos_mcp`)
+- ✓ Independent read/write circuit breakers (in `cos_mcp`)
 - ✓ All SDK calls verified against HydraDB Cloud
 - ✓ Fire-and-forget write threads with content-hash IDs
 
-### Phase 2: Integration Testing — Not Yet Executed
+### Phase 2: Integration Testing — In Progress
 
-- Write test suite (`test_hydradb_provider.py`) with fake client
-- Test config, queries, writes, circuit breaker, shutdown
-- Test per-profile `sub_tenant_id` resolution
-- Test metadata JSON string encoding gotcha
-- Verify against live HydraDB API with real API key
+- ✓ Test suite at `tests/plugins/memory/test_hydradb_provider.py` with fake backend
+- Tests for config, queries, writes, circuit breaker, shutdown
+- Tests for per-profile `sub_tenant_id` resolution
+- Tests for metadata JSON string encoding gotcha
+- [ ] Verify against live HydraDB API with real API key
 
 ### Phase 3: Hermes Integration — Deployed
 
@@ -76,13 +78,23 @@ A companion **MuninnDB provider** is also available at `../muninn-memory/` — i
 - ✓ Per-profile `sub_tenant_id` isolation verified
 - ✓ Works in cos-mcp and other profiles
 
+### Phase 5: Shared Infrastructure (cos_mcp) ✓ COMPLETE
+
+- ✓ `BaseMemoryProvider` with threading, circuit breaker, read/write paths, shared tool helpers
+- ✓ `MemoryBackend` ABC — uniform interface for backends
+- ✓ `MemoryFormatter` ABC — backend-specific formatting
+- ✓ `HydraDBBackend` and `HydraDBFormatter` in cos_mcp package
+- ✓ HydraDB provider refactored to thin adapter (~284 lines)
+
 ## Key Files
 
-- Design doc: `research/hydradb-provider-design.md`
-- Hermes research: `research/hermes-memory-provider-research.md`
-- HydraDB research: `research/hydradb-v2-research.md`
+- Shared infrastructure: `cos_mcp/base_provider.py`, `cos_mcp/backends/hydradb.py`, `cos_mcp/formatting/hydradb.py`
 - Implementation: `hydradb-memory/__init__.py`, `hydradb-memory/plugin.yaml`, `hydradb-memory/README.md`
 - MuninnDB sibling: `../muninn-memory/__init__.py`
+- Context engines: `../plugins/context_engine/hydradb-context/`, `../plugins/context_engine/muninn-context/`
+- Design doc: `research/hydradb-provider-design.md`
+- HydraDB research: `research/hydradb-v2-research.md`
+- Hermes research: `research/hermes-memory-provider-research.md`
 
 ## Constraints
 
