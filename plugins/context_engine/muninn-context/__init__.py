@@ -55,74 +55,68 @@ DEFAULT_CONFIG: Dict[str, Any] = {
 # ---------------------------------------------------------------------------
 
 SEARCH_CONTEXT_SCHEMA: Dict[str, Any] = {
-    "type": "function",
-    "function": {
-        "name": "muninn_context_search",
-        "description": (
-            "Search MuninnDB context for relevant compressed conversation context. "
-            "Use this to recall topics, decisions, facts, and relationships from "
-            "earlier in the conversation that were compressed into cognitive engrams. "
-            "MuninnDB uses ACT-R temporal decay (frequently accessed context stays "
-            "strong), Hebbian co-activation (related context auto-associates), and "
-            "Bayesian confidence (contradicted context is discounted). Results are "
-            "gated by Bayesian confidence — low-confidence matches are excluded."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": (
-                        "What to search for in compressed context "
-                        "(topics, decisions, facts, relationships)"
-                    ),
-                },
-                "min_confidence": {
-                    "type": "number",
-                    "description": (
-                        "Minimum Bayesian confidence threshold (0.0-1.0). "
-                        "Lower values include uncertain/contradicted context. "
-                        "Default 0.3."
-                    ),
-                },
+    "name": "muninn_context_search",
+    "description": (
+        "Search MuninnDB context for relevant compressed conversation context. "
+        "Use this to recall topics, decisions, facts, and relationships from "
+        "earlier in the conversation that were compressed into cognitive engrams. "
+        "MuninnDB uses ACT-R temporal decay (frequently accessed context stays "
+        "strong), Hebbian co-activation (related context auto-associates), and "
+        "Bayesian confidence (contradicted context is discounted). Results are "
+        "gated by Bayesian confidence — low-confidence matches are excluded."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": (
+                    "What to search for in compressed context "
+                    "(topics, decisions, facts, relationships)"
+                ),
             },
-            "required": ["query"],
+            "min_confidence": {
+                "type": "number",
+                "description": (
+                    "Minimum Bayesian confidence threshold (0.0-1.0). "
+                    "Lower values include uncertain/contradicted context. "
+                    "Default 0.3."
+                ),
+            },
         },
+        "required": ["query"],
     },
 }
 
 EXPAND_CONTEXT_SCHEMA: Dict[str, Any] = {
-    "type": "function",
-    "function": {
-        "name": "muninn_context_expand",
-        "description": (
-            "Retrieve the full context entities for a specific ctx-id or topic "
-            "from compressed conversation history. Use this when a summary block "
-            "references a [ctx-id: ...] anchor to get the complete entities behind "
-            "that compression point. Bayesian confidence gates results — "
-            "low-confidence engrams are excluded."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "ctx_id": {
-                    "type": "string",
-                    "description": (
-                        "The ctx-id anchor from a summary block "
-                        "(e.g., 'User_0_a1b2c3d4'). Retrieves all entities from "
-                        "that compression point."
-                    ),
-                },
-                "topic": {
-                    "type": "string",
-                    "description": (
-                        "A topic keyword to expand. Retrieves all context entities "
-                        "related to this topic across compression points."
-                    ),
-                },
+    "name": "muninn_context_expand",
+    "description": (
+        "Retrieve the full context entities for a specific ctx-id or topic "
+        "from compressed conversation history. Use this when a summary block "
+        "references a [ctx-id: ...] anchor to get the complete entities behind "
+        "that compression point. Bayesian confidence gates results — "
+        "low-confidence engrams are excluded."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "ctx_id": {
+                "type": "string",
+                "description": (
+                    "The ctx-id anchor from a summary block "
+                    "(e.g., 'User_0_a1b2c3d4'). Retrieves all entities from "
+                    "that compression point."
+                ),
             },
-            "required": ["ctx_id"],
+            "topic": {
+                "type": "string",
+                "description": (
+                    "A topic keyword to expand. Retrieves all context entities "
+                    "related to this topic across compression points."
+                ),
+            },
         },
+        "required": ["ctx_id"],
     },
 }
 
@@ -177,9 +171,12 @@ class MuninnDBContextEngine(BaseContextEngine):
 
     @classmethod
     def is_available(cls) -> bool:
-        """Check credentials and requests import — no network calls."""
-        if not os.environ.get("MUNINN_API_KEY"):
-            return False
+        """Check requests import — no network call.
+
+        Brendan's local MuninnDB runs in dev mode without auth. Requiring
+        MUNINN_API_KEY here prevents the engine from activating and, worse,
+        setting a dummy key makes the server reject requests with 401.
+        """
         try:
             import requests  # noqa: F401
             return True
@@ -792,16 +789,13 @@ class MuninnDBContextEngine(BaseContextEngine):
     # --- Tool Schemas (MUN-05) ---------------------------------------------
 
     def get_tool_schemas(self) -> List[Dict[str, Any]]:
-        """Return tool schemas if engine is active, [] otherwise (defensive gating).
+        """Return MuninnDB context tool schemas.
 
-        Returns [] when:
-            - agent_context != "primary" (non-primary agent shouldn't register tools)
-            - _backend is None (engine not properly initialized)
+        Hermes injects context-engine tools before it calls on_session_start().
+        Do not gate on ``_backend`` here or the tools disappear for the whole
+        session even though initialization succeeds immediately afterward.
+        Runtime handlers still fail open if the backend is unavailable.
         """
-        if not hasattr(self, "_agent_context") or self._agent_context != "primary":
-            return []
-        if not hasattr(self, "_backend") or self._backend is None:
-            return []
         return [SEARCH_CONTEXT_SCHEMA, EXPAND_CONTEXT_SCHEMA]
 
     # --- Tool: context_search (MUN-06) -------------------------------------
@@ -899,7 +893,10 @@ class MuninnDBContextEngine(BaseContextEngine):
         /api/health. Does not crash if backend is unreachable —
         logs warning, agent continues without context engine.
         """
-        super().on_session_start(session_id, **kwargs)
+        if not hasattr(self, "_backend") or self._backend is None:
+            self.initialize(session_id, **kwargs)
+        else:
+            super().on_session_start(session_id, **kwargs)
 
         if self._agent_context != "primary":
             logger.debug(

@@ -4,8 +4,6 @@ description: "MuninnDB-backed cognitive memory — ACT-R temporal scoring, Hebbi
 pip_dependencies:
   - requests>=2.31
   - cos-mcp>=0.2.0
-requires_env:
-  - MUNINN_API_KEY
 hooks:
   - on_session_end
   - on_memory_write
