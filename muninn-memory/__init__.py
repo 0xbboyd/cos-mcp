@@ -60,103 +60,94 @@ def _load_config(hermes_home: str = "") -> dict:
 # ---------------------------------------------------------------------------
 
 SEARCH_SCHEMA = {
-    "type": "function",
-    "function": {
-        "name": "muninn_search",
-        "description": (
-            "Search MuninnDB memory for relevant facts, preferences, decisions, "
-            "and past context. MuninnDB uses ACT-R temporal scoring (frequently "
-            "accessed memories surface; stale ones fade), Hebbian co-activation "
-            "(related memories emerge automatically), and Bayesian confidence "
-            "(contradicted memories rank lower)."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "What to search for in memory.",
-                },
-                "memory_type": {
-                    "type": "string",
-                    "description": (
-                        "Optional filter by memory type. One of: fact, decision, "
-                        "preference, observation, issue, task, procedure, event, "
-                        "goal, constraint, identity, reference."
-                    ),
-                    "enum": [
-                        "fact", "decision", "preference", "observation",
-                        "issue", "task", "procedure", "event",
-                        "goal", "constraint", "identity", "reference",
-                    ],
-                },
-                "min_confidence": {
-                    "type": "number",
-                    "description": (
-                        "Minimum confidence threshold (0.0-1.0). Lower values "
-                        "include uncertain/contradicted memories. Default 0.5."
-                    ),
-                },
+    "name": "muninn_search",
+    "description": (
+        "Search MuninnDB memory for relevant facts, preferences, decisions, "
+        "and past context. MuninnDB uses ACT-R temporal scoring (frequently "
+        "accessed memories surface; stale ones fade), Hebbian co-activation "
+        "(related memories emerge automatically), and Bayesian confidence "
+        "(contradicted memories rank lower)."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "What to search for in memory.",
             },
-            "required": ["query"],
+            "memory_type": {
+                "type": "string",
+                "description": (
+                    "Optional filter by memory type. One of: fact, decision, "
+                    "preference, observation, issue, task, procedure, event, "
+                    "goal, constraint, identity, reference."
+                ),
+                "enum": [
+                    "fact", "decision", "preference", "observation",
+                    "issue", "task", "procedure", "event",
+                    "goal", "constraint", "identity", "reference",
+                ],
+            },
+            "min_confidence": {
+                "type": "number",
+                "description": (
+                    "Minimum confidence threshold (0.0-1.0). Lower values "
+                    "include uncertain/contradicted memories. Default 0.5."
+                ),
+            },
         },
+        "required": ["query"],
     },
 }
 
 PROFILE_SCHEMA = {
-    "type": "function",
-    "function": {
-        "name": "muninn_profile",
-        "description": (
-            "Retrieve the user profile from MuninnDB memory — preferences, "
-            "identity, and stable facts about the user."
-        ),
-        "parameters": {"type": "object", "properties": {}},
-    },
+    "name": "muninn_profile",
+    "description": (
+        "Retrieve the user profile from MuninnDB memory — preferences, "
+        "identity, and stable facts about the user."
+    ),
+    "parameters": {"type": "object", "properties": {}},
 }
 
 REMEMBER_SCHEMA = {
-    "type": "function",
-    "function": {
-        "name": "muninn_remember",
-        "description": (
-            "Store a durable fact, decision, or preference in MuninnDB memory. "
-            "MuninnDB automatically classifies the memory type, links it to "
-            "related memories via overlapping tags, and runs contradiction "
-            "detection against existing memories."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "concept": {
-                    "type": "string",
-                    "description": "Short label for the memory (e.g. 'prefers concise responses').",
-                },
-                "content": {
-                    "type": "string",
-                    "description": "The full fact, decision, or preference to store.",
-                },
-                "memory_type": {
-                    "type": "string",
-                    "description": (
-                        "Optional classification. One of: fact, decision, "
-                        "preference, observation, issue, task, procedure, "
-                        "event, goal, constraint, identity, reference."
-                    ),
-                    "enum": [
-                        "fact", "decision", "preference", "observation",
-                        "issue", "task", "procedure", "event",
-                        "goal", "constraint", "identity", "reference",
-                    ],
-                },
-                "tags": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Optional topic tags for auto-association.",
-                },
+    "name": "muninn_remember",
+    "description": (
+        "Store a durable fact, decision, or preference in MuninnDB memory. "
+        "MuninnDB automatically classifies the memory type, links it to "
+        "related memories via overlapping tags, and runs contradiction "
+        "detection against existing memories."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "concept": {
+                "type": "string",
+                "description": "Short label for the memory (e.g. 'prefers concise responses').",
             },
-            "required": ["concept", "content"],
+            "content": {
+                "type": "string",
+                "description": "The full fact, decision, or preference to store.",
+            },
+            "memory_type": {
+                "type": "string",
+                "description": (
+                    "Optional classification. One of: fact, decision, "
+                    "preference, observation, issue, task, procedure, "
+                    "event, goal, constraint, identity, reference."
+                ),
+                "enum": [
+                    "fact", "decision", "preference", "observation",
+                    "issue", "task", "procedure", "event",
+                    "goal", "constraint", "identity", "reference",
+                ],
+            },
+            "tags": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Optional topic tags for auto-association.",
+            },
         },
+        "required": ["concept", "content"],
     },
 }
 
