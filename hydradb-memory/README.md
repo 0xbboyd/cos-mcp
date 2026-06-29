@@ -4,7 +4,7 @@ HydraDB-backed persistent memory — graph-enriched recall and personalized
 context via the HydraDB v2 API. One HydraDB tenant shared across all your
 Hermes profiles; optional per-profile isolation via sub-tenants.
 
-Thin provider (~284 lines) extending `cos_mcp.BaseMemoryProvider`. All shared
+Thin provider (~297 lines) extending `cos_mcp.BaseMemoryProvider`. All shared
 infrastructure (circuit breaker, threading, config loading) lives in the
 `cos_mcp` package.
 
@@ -74,7 +74,7 @@ The provider extends `cos_mcp.BaseMemoryProvider` which handles:
 - Prefetch / cache model for reads
 - Session lifecycle hooks
 
-The thin provider (~284 lines) only defines HydraDB-specific config, tool
+The thin provider (~297 lines) only defines HydraDB-specific config, tool
 schemas, tool handlers, and system prompt text.
 
 - **Every turn:** A background query fetches relevant memories before the
@@ -110,7 +110,7 @@ Shared infrastructure in `cos_mcp/`:
 - `cos_mcp/circuit_breaker.py` — Dual-gauge circuit breaker
 - `cos_mcp/base_provider.py` — BaseMemoryProvider (threading, lifecycle)
 
-Thin plugin at `hydradb-memory/__init__.py` (~284 lines):
+Thin plugin at `hydradb-memory/__init__.py` (~297 lines):
 - Config, tool schemas, tool handlers, system prompt block
 - Subclass hooks: `_create_backend()`, `_create_formatter()`
 
@@ -118,6 +118,6 @@ Research: `research/hydradb-provider-design.md` (blueprint), `research/hydradb-v
 
 ## Requirements
 
-- Python 3.12+
+- Python 3.11+
 - `cos_mcp` package (shared infrastructure)
 - `hydradb-sdk>=2,<3`

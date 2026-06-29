@@ -22,7 +22,7 @@ cos_mcp/                               # Shared infrastructure package
     ├── muninn.py                      # MuninnDBFormatter
     └── muninn_context.py              # MuninnDBContextFormatter
 
-hydradb-memory/                        # Thin HydraDB memory provider (~284 lines)
+hydradb-memory/                        # Thin HydraDB memory provider (~297 lines)
 muninn-memory/                         # Thin MuninnDB memory provider (~384 lines)
 plugins/context_engine/
 ├── hydradb-context/                   # Thin HydraDB context engine (~973 lines)

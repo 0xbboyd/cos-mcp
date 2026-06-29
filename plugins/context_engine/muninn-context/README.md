@@ -170,7 +170,7 @@ Both implement the same `ContextEngine` ABC — swap by changing
 
 ## Requirements
 
-- Python 3.12+
+- Python 3.11+
 - `cos_mcp` package (shared infrastructure)
 - `requests>=2.31`
 - Running MuninnDB server at `http://127.0.0.1:8475`

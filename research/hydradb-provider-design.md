@@ -1,5 +1,10 @@
 # HydraDB Memory Provider — Architecture Design
 
+> **Note (2026-06-29):** This document describes the v0.1 pre-refactor architecture
+> where all logic lived in a single monolithic provider class. The code has since
+> been refactored into a shared `cos_mcp` package with thin provider plugins.
+> See `HERMES.md` and `README.md` for the current v0.2.0 architecture.
+
 > **Goal:** A Hermes Agent memory provider plugin backed by HydraDB v2, shared
 > across all profiles. This document specifies the full architecture, file
 > layout, method contracts, data flow, and testing strategy. It is the blueprint
