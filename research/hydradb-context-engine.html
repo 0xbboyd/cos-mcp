@@ -155,6 +155,13 @@
   </style>
 </head>
 <body>
+  <!-- NOTE (2026-06-29): This diagram reflects the v0.1 design. The code has
+       since been refactored into a shared cos_mcp package. Key differences:
+       - `name` is now "hydradb-context" (was "hydradb")
+       - Circuit breaker uses 3 failures for context engines (was 5)
+       - Config key is `compression.provider` (was `context.engine`)
+       - hydradb-memory is 297 lines (was 284)
+       See HERMES.md for current architecture. -->
   <div class="container">
     <!-- Header -->
     <div class="header">

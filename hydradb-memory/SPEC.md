@@ -6,7 +6,7 @@ Build a Hermes Agent memory provider plugin backed by HydraDB v2 — a managed c
 
 ## Current State
 
-The provider is **complete and deployed**. The implementation at `hydradb-memory/__init__.py` (284 lines) is a thin adapter extending `cos_mcp.BaseMemoryProvider`. All shared infrastructure (circuit breaker, threading, config loading, read/write path patterns) lives in the `cos_mcp` package.
+The provider is **complete and deployed**. The implementation at `hydradb-memory/__init__.py` (297 lines) is a thin adapter extending `cos_mcp.BaseMemoryProvider`. All shared infrastructure (circuit breaker, threading, config loading, read/write path patterns) lives in the `cos_mcp` package.
 
 The plugin defines:
 - Config layer (`_load_config` — env + JSON merge)
@@ -34,7 +34,7 @@ Additional **context engine plugins** at `../plugins/context_engine/` provide gr
 8. **`upsert="true"`** (string, not bool). **metadata as JSON string** for type=memory.
 9. **Content-hash IDs** on `on_memory_write` for deterministic upsert/delete (`hashlib.sha256`).
 10. **Batched `on_session_end`**: ingests last 10 user/assistant messages from last 20 total.
-11. **Shared infrastructure**: BaseMemoryProvider in `cos_mcp` handles circuit breaker, threading, config loading, read/write paths, and session hooks. Provider is a thin subclass (~284 lines).
+11. **Shared infrastructure**: BaseMemoryProvider in `cos_mcp` handles circuit breaker, threading, config loading, read/write paths, and session hooks. Provider is a thin subclass (~297 lines).
 
 ## Verified Facts
 
@@ -84,7 +84,7 @@ Additional **context engine plugins** at `../plugins/context_engine/` provide gr
 - ✓ `MemoryBackend` ABC — uniform interface for backends
 - ✓ `MemoryFormatter` ABC — backend-specific formatting
 - ✓ `HydraDBBackend` and `HydraDBFormatter` in cos_mcp package
-- ✓ HydraDB provider refactored to thin adapter (~284 lines)
+- ✓ HydraDB provider refactored to thin adapter (~297 lines)
 
 ## Key Files
 

@@ -217,7 +217,20 @@ class HydraDBMemoryProvider(BaseMemoryProvider):
     @staticmethod
     def system_prompt_block() -> str:
         """Static text injected into the system prompt."""
-        return "HydraDB Memory. Active. Memories are retrieved each turn."
+        return (
+            "HydraDB Memory. Active. Persistent graph database with hybrid search "
+            "(semantic + BM25 + graph traversal + recency scoring). Three tools: "
+            "hydradb_profile \u2014 retrieve stored user identity, name, role, and preferences. "
+            "Call when asked 'who am I', 'what\u2019s my name', or 'what do you know about me'. "
+            "Never guess \u2014 check first. "
+            "hydradb_search \u2014 find past facts, decisions, preferences, and context "
+            "from previous conversations. Call when the user references previously "
+            "shared information, asks 'do you remember', or seems to expect recall. "
+            "hydradb_conclude \u2014 store durable facts and preferences "
+            "(append-only, cannot be deleted). Call when the user asks you to "
+            "remember something or explicitly states a preference. "
+            "Only use memory tools when relevant to the request."
+        )
 
     # --- Tools --------------------------------------------------------------
 
