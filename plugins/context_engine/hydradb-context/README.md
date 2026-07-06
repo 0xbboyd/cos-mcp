@@ -132,7 +132,7 @@ data from polluting memory search results and vice versa.
 
 ## Requirements
 
-- Python 3.12+
+- Python 3.11+
 - `cos_mcp` package (shared infrastructure)
 - `hydradb-sdk>=2,<3`
 - `HYDRA_DB_API_KEY` environment variable

@@ -18,7 +18,7 @@ Four plugins extend this infrastructure:
 
 ### Constraints
 
-- **Tech stack:** Python 3.12+, sync only (no asyncio)
+- **Tech stack:** Python 3.11+, sync only (no asyncio)
 - **Plugin contract:** Must implement Hermes Agent ABCs — never hardcode `~/.hermes`, use `hermes_home` kwarg
 - **Secrets:** API keys in `~/.hermes/.env`, never committed
 - **Tool naming:** Prefix tools with provider prefix to avoid core-tool collisions (`hydradb_*`, `muninn_*`)
@@ -33,20 +33,20 @@ Four plugins extend this infrastructure:
 
 ## Languages
 
-- Python 3.12+ — All application code
+- Python 3.11+ — All application code
 - `base_provider.py` (352 lines) — BaseMemoryProvider with threading, circuit breaker, read/write paths
 - `base_context_engine.py` (341 lines) — BaseContextEngine with token tracking, compression gate, lifecycle
 - `circuit_breaker.py` (103 lines) — Dual-gauge (read/write) circuit breaker with configurable thresholds
 - `backends/` — MemoryBackend ABC, HydraDBBackend (245 lines), MuninnDBBackend (217 lines)
 - `formatting/` — MemoryFormatter ABC, ContextFormatter ABC, HydraDB/Muninn formatters for both memory and context
-- `hydradb-memory/__init__.py` (284 lines) — Thin HydraDB provider extending BaseMemoryProvider
+- `hydradb-memory/__init__.py` (314 lines) — Thin HydraDB provider extending BaseMemoryProvider
 - `muninn-memory/__init__.py` (384 lines) — Thin MuninnDB provider extending BaseMemoryProvider
 - `plugins/context_engine/hydradb-context/__init__.py` (973 lines) — Graph-backed context compression + retrieval
 - `plugins/context_engine/muninn-context/__init__.py` (1007 lines) — Cognitive-backed context compression + retrieval
 
 ## Runtime
 
-- Python 3.12.3 (CPython, system-installed on Linux 6.17.0-35-generic)
+- Python 3.11.15 (CPython, system-installed on Linux 6.17.0-35-generic)
 - PEP 668 enforced — virtual environments required (venv or uv)
 - No browser runtime (server-side/agent plugin only)
 - `pyproject.toml` — build config (`setuptools>=68`), project deps, optional dependency groups
@@ -105,10 +105,10 @@ Four plugins extend this infrastructure:
 ## Platform Requirements
 
 - Linux (x86_64) — primary development environment
-- Python 3.12+ with virtualenv
+- Python 3.11+ with virtualenv
 - Network access to `https://api.hydradb.com` (HydraDB provider/context engine)
 - Local MuninnDB server at `http://127.0.0.1:8475` (MuninnDB provider/context engine)
-- Any platform with Python 3.12+ (plugins are Hermes Agent in-tree plugins)
+- Any platform with Python 3.11+ (plugins are Hermes Agent in-tree plugins)
 - Deployed by copying plugin directories to `~/.hermes/hermes-agent/plugins/memory/` and `~/.hermes/hermes-agent/plugins/context_engine/`
 - HydraDB: requires `hydradb-sdk>=2,<3` in Hermes Agent virtualenv + `HYDRA_DB_API_KEY`
 - MuninnDB: requires `requests>=2.31` + running MuninnDB server + `MUNINN_API_KEY`
