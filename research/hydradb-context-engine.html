@@ -241,7 +241,7 @@
         <!-- Step 1: Entity Extraction -->
         <rect x="40" y="405" width="340" height="52" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1"/>
         <text x="210" y="426" fill="white" font-size="11" font-weight="600" text-anchor="middle">Entity + Relationship Extraction</text>
-        <text x="210" y="446" fill="#94a3b8" font-size="9" text-anchor="middle">LLM-powered · extracts entities, facts, cross-references</text>
+        <text x="210" y="446" fill="#94a3b8" font-size="9" text-anchor="middle">Pure Python heuristics · extracts entities, facts, cross-references</text>
 
         <!-- Arrow: compress() → entity extraction -->
         <line x1="210" y1="372" x2="210" y2="403" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowhead)"/>
@@ -324,7 +324,7 @@
         <text x="1045" y="446" fill="#94a3b8" font-size="8">sync_turn</text>
 
         <text x="1045" y="470" fill="#64748b" font-size="7">hydradb-memory/</text>
-        <text x="1045" y="484" fill="#64748b" font-size="7">  __init__.py (L1-284)</text>
+        <text x="1045" y="484" fill="#64748b" font-size="7">  __init__.py (L1-314)</text>
 
         <text x="1045" y="508" fill="#fbbf24" font-size="8" font-weight="600">Separate Concern</text>
         <text x="1045" y="524" fill="#64748b" font-size="7">Memory ≠ Context</text>
@@ -448,7 +448,7 @@
           <li>• <strong>Separate concerns</strong> — Memory Provider handles <em>retrieval</em> (what does the agent remember?). Context Engine handles <em>compression</em> (how do we fit everything in the context window?). Both coexist in the same plugin system.</li>
         </ul>
         <p class="file-ref" style="margin-top:0.5rem">
-          Refs: <code>hydradb-memory/__init__.py</code> L115-284 (HydraDBMemoryProvider),
+          Refs: <code>hydradb-memory/__init__.py</code> L115-314 (HydraDBMemoryProvider),
           <code>hydradb-memory/__init__.py</code> L252-274 (_tool_profile with circuit breaker + graph_context=True),
           <code>cos_mcp/base_provider.py</code> L60-61, L120-180 (breaker + prefetch/sync patterns)
         </p>
