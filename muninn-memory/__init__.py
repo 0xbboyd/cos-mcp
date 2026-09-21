@@ -17,7 +17,25 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
+from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+
+def _bootstrap_shared_package() -> None:
+    """Prefer an explicit source root before importing shared COS modules."""
+    source_root = os.environ.get("COS_MCP_SHARED_ROOT", "").strip()
+    if not source_root:
+        return
+
+    candidate = Path(source_root).expanduser().resolve()
+    if not (candidate / "cos_mcp" / "base_provider.py").is_file():
+        raise RuntimeError("COS_MCP_SHARED_ROOT does not contain cos_mcp shared provider modules")
+    if str(candidate) not in sys.path:
+        sys.path.insert(0, str(candidate))
+
+
+_bootstrap_shared_package()
 
 from cos_mcp.base_provider import BaseMemoryProvider
 from cos_mcp.backends.muninn import MuninnDBBackend
